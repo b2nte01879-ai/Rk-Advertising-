@@ -498,9 +498,9 @@ export default function LedgerApp() {
   };
 
   return (
-    <div className="min-h-screen w-full flex justify-center" style={{ background: "#E4D8BE" }}>
+    <div className="min-h-screen w-full flex justify-center bg-[#E4D8BE] lg:bg-[#F3ECDD]">
       <div
-        className="min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto"
+        className="min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto lg:max-w-6xl lg:h-screen lg:my-0 lg:rounded-none lg:shadow-none"
         style={{ background: "#F3ECDD", fontFamily: "'Noto Sans Bengali', sans-serif" }}
       >
         {/* ---------- YEARS ---------- */}
