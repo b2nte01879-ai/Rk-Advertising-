@@ -499,8 +499,20 @@ export default function LedgerApp() {
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-[#E4D8BE] lg:bg-[#F3ECDD]">
+      <style>{`
+        @media (min-width: 1024px) {
+          .rk-zoom { zoom: 1.35; }
+          .rk-zoom .rk-days-grid { zoom: 0.45; }
+          .rk-zoom .rk-brand-title { font-size: 20px !important; }
+        }
+        @media (min-width: 1440px) {
+          .rk-zoom { zoom: 1.55; }
+          .rk-zoom .rk-days-grid { zoom: 0.4; }
+          .rk-zoom .rk-brand-title { font-size: 23px !important; }
+        }
+      `}</style>
       <div
-        className="min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto lg:max-w-6xl lg:h-screen lg:my-0 lg:rounded-none lg:shadow-none"
+        className="rk-zoom min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto lg:max-w-6xl lg:h-screen lg:my-0 lg:rounded-none lg:shadow-none"
         style={{ background: "#F3ECDD", fontFamily: "'Noto Sans Bengali', sans-serif" }}
       >
         {/* ---------- YEARS ---------- */}
@@ -509,7 +521,7 @@ export default function LedgerApp() {
             <HeaderBar
               title={
                 <div className="leading-tight">
-                  <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.3, opacity: 0.9 }}>
+                  <div className="rk-brand-title" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.3, opacity: 0.9 }}>
                     R.K ADVERTISING AND DIGITAL HOUSE
                   </div>
                   <div style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 18 }}>দৈনিক হিসাব</div>
@@ -519,10 +531,10 @@ export default function LedgerApp() {
               onToggleMode={toggleEditMode}
             />
 
-            <div className="px-3 pt-5 pb-1">
+            <div className="px-3 pt-5 pb-1 lg:flex">
               <button
                 onClick={() => setView("dues")}
-                className="w-full flex items-center justify-between px-4 py-4 rounded-sm active:opacity-80"
+                className="w-full flex items-center justify-between px-4 py-4 rounded-sm active:opacity-80 lg:w-auto lg:min-w-[320px] lg:max-w-sm"
                 style={{ background: "#8C2F26", color: "#F3ECDD" }}
               >
                 <div className="text-left">
@@ -531,7 +543,7 @@ export default function LedgerApp() {
                     {allDuesLoading ? "লোড হচ্ছে…" : `${toBn(allDues.length)} টা এন্ট্রি`}
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-right ml-4">
                   <div style={{ fontSize: 18, fontWeight: 700 }}>
                     {allDuesLoading ? "…" : fmt(allDues.reduce((s, e) => s + (e.amount || 0), 0))}
                   </div>
@@ -628,17 +640,19 @@ export default function LedgerApp() {
           <>
             <HeaderBar title={`সন ${toBn(year)}`} onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
 
-            <div className="px-3 pt-4">
-              <SectionTitle label="বছরের সারাংশ" />
-              {yearStatsLoading ? (
-                <p style={{ fontSize: 12, color: "#8A7A5C" }}>লোড হচ্ছে…</p>
-              ) : (
-                <div className="rounded-sm overflow-hidden mb-2" style={{ border: "1px solid #8C2F26" }}>
-                  <SummaryRow label="মোট আয় =" value={fmt(yearStats.income)} />
-                  <SummaryRow label="মোট খরচ = (-)" value={fmt(yearStats.expense)} negative />
-                  <SummaryRow label="থাকলো =" value={fmt(yearStats.income - yearStats.expense)} strong />
-                </div>
-              )}
+            <div className="px-3 pt-4 lg:flex lg:justify-end">
+              <div className="lg:w-full lg:max-w-md">
+                <SectionTitle label="বছরের সারাংশ" />
+                {yearStatsLoading ? (
+                  <p style={{ fontSize: 12, color: "#8A7A5C" }}>লোড হচ্ছে…</p>
+                ) : (
+                  <div className="rounded-sm overflow-hidden mb-2 lg:scale-110 lg:origin-top-right" style={{ border: "1px solid #8C2F26" }}>
+                    <SummaryRow label="মোট আয় =" value={fmt(yearStats.income)} />
+                    <SummaryRow label="মোট খরচ = (-)" value={fmt(yearStats.expense)} negative />
+                    <SummaryRow label="থাকলো =" value={fmt(yearStats.income - yearStats.expense)} strong />
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="px-4 pt-4 pb-1">
@@ -670,7 +684,7 @@ export default function LedgerApp() {
               editMode={editMode}
               onToggleMode={toggleEditMode}
             />
-            <div className="grid grid-cols-5 gap-2 p-4">
+            <div className="rk-days-grid grid grid-cols-5 gap-2 p-4">
               {Array.from({ length: daysInMonth(year, month) }, (_, i) => i + 1).map((d) => (
                 <button
                   key={d}
