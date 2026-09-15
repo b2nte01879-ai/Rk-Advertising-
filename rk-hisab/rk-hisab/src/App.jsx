@@ -345,6 +345,58 @@ export default function LedgerApp() {
   const [view, setView] = useState("years"); // years | dues | months | days | day
   const [editMode, setEditMode] = useState(false);
 
+  // পুরো অ্যাপ দেখার জন্য পাসওয়ার্ড লক (এডিট মোডের পিন থেকে আলাদা)
+  const SITE_PASSWORD_KEY = "sitePassword";
+  const [unlocked, setUnlocked] = useState(false);
+  const [checkingLock, setCheckingLock] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        if (localStorage.getItem("siteUnlocked") === "true") {
+          setUnlocked(true);
+          setCheckingLock(false);
+          return;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      let stored = null;
+      try {
+        const res = await storage.get(SITE_PASSWORD_KEY);
+        stored = res && res.value;
+      } catch (e) {
+        /* ignore */
+      }
+      if (!stored) {
+        const newPw = window.prompt(
+          "এই অ্যাপ প্রথমবার খোলা হচ্ছে — একটা পাসওয়ার্ড সেট করুন (এটা মনে রাখুন, ভবিষ্যতে সবার জন্য এটাই লাগবে):"
+        );
+        if (newPw && newPw.trim()) {
+          await storage.set(SITE_PASSWORD_KEY, newPw.trim());
+          setUnlocked(true);
+          try {
+            localStorage.setItem("siteUnlocked", "true");
+          } catch (e) {
+            /* ignore */
+          }
+        }
+        setCheckingLock(false);
+        return;
+      }
+      const entered = window.prompt("পাসওয়ার্ড দিন:");
+      if (entered !== null && entered.trim() === stored) {
+        setUnlocked(true);
+        try {
+          localStorage.setItem("siteUnlocked", "true");
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      setCheckingLock(false);
+    })();
+  }, []);
+
   // এডিট/ভিউ মোড এখন এই ব্রাউজারের নিজস্ব পছন্দ (localStorage), Firestore-এ যায় না
   useEffect(() => {
     try {
@@ -354,16 +406,51 @@ export default function LedgerApp() {
     }
   }, []);
 
-  const toggleEditMode = () => {
-    setEditMode((prev) => {
-      const next = !prev;
+  const ADMIN_PIN_KEY = "adminPin";
+
+  const toggleEditMode = async () => {
+    if (editMode) {
+      setEditMode(false);
       try {
-        localStorage.setItem("editMode", next ? "true" : "false");
+        localStorage.setItem("editMode", "false");
       } catch (e) {
         /* ignore */
       }
-      return next;
-    });
+      return;
+    }
+    let stored = null;
+    try {
+      const res = await storage.get(ADMIN_PIN_KEY);
+      stored = res && res.value;
+    } catch (e) {
+      /* ignore */
+    }
+    if (!stored) {
+      const newPin = window.prompt(
+        "প্রথমবার এডিট মোড চালু করছেন — একটা পিন সেট করুন (এটা মনে রাখুন, পরে সবসময় এটাই লাগবে):"
+      );
+      if (!newPin || !newPin.trim()) return;
+      await storage.set(ADMIN_PIN_KEY, newPin.trim());
+      setEditMode(true);
+      try {
+        localStorage.setItem("editMode", "true");
+      } catch (e) {
+        /* ignore */
+      }
+      return;
+    }
+    const entered = window.prompt("এডিট মোড খুলতে পিন দিন:");
+    if (entered === null) return;
+    if (entered.trim() === stored) {
+      setEditMode(true);
+      try {
+        localStorage.setItem("editMode", "true");
+      } catch (e) {
+        /* ignore */
+      }
+    } else {
+      window.alert("পিন ভুল হয়েছে।");
+    }
   };
 
   const [year, setYear] = useState(null);
@@ -497,17 +584,44 @@ export default function LedgerApp() {
     setOpeningOverride(null);
   };
 
+  if (checkingLock) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center" style={{ background: "#F3ECDD" }}>
+        <p style={{ fontFamily: "'Noto Serif Bengali', serif", color: "#8C2F26" }}>লোড হচ্ছে…</p>
+      </div>
+    );
+  }
+
+  if (!unlocked) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center px-6" style={{ background: "#F3ECDD" }}>
+        <div className="text-center max-w-xs">
+          <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 18, color: "#8C2F26", marginBottom: 14 }}>
+            পাসওয়ার্ড ছাড়া এই পাতা দেখা যাবে না
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 rounded-sm"
+            style={{ background: "#8C2F26", color: "#F3ECDD", fontWeight: 600 }}
+          >
+            আবার চেষ্টা করুন
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full flex justify-center bg-[#E4D8BE] lg:bg-[#F3ECDD]">
       <style>{`
         @media (min-width: 1024px) {
           .rk-zoom { zoom: 1.35; }
-          .rk-zoom .rk-days-grid { zoom: 0.45; }
+          .rk-zoom .rk-day-num { font-size: 13px !important; }
           .rk-zoom .rk-brand-title { font-size: 20px !important; }
         }
         @media (min-width: 1440px) {
           .rk-zoom { zoom: 1.55; }
-          .rk-zoom .rk-days-grid { zoom: 0.4; }
+          .rk-zoom .rk-day-num { font-size: 12px !important; }
           .rk-zoom .rk-brand-title { font-size: 23px !important; }
         }
       `}</style>
@@ -684,12 +798,12 @@ export default function LedgerApp() {
               editMode={editMode}
               onToggleMode={toggleEditMode}
             />
-            <div className="rk-days-grid grid grid-cols-5 gap-2 p-4">
+            <div className="grid grid-cols-5 gap-2 p-4 lg:grid-cols-10 lg:gap-1.5 lg:p-4 lg:max-w-xl">
               {Array.from({ length: daysInMonth(year, month) }, (_, i) => i + 1).map((d) => (
                 <button
                   key={d}
                   onClick={() => openDay(year, month, d)}
-                  className="aspect-square flex items-center justify-center rounded-sm active:opacity-70"
+                  className="rk-day-num aspect-square flex items-center justify-center rounded-sm active:opacity-70"
                   style={{ background: "#FFFDF7", border: "1px solid #D9CBA8", color: "#2A211B", fontFamily: "'Noto Serif Bengali', serif", fontSize: 17 }}
                 >
                   {toBn(d)}
