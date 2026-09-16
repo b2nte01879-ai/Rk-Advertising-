@@ -455,14 +455,6 @@ export default function LedgerApp() {
 
   const [year, setYear] = useState(null);
   const [month, setMonth] = useState(null);
-  const [day, setDay] = useState(null);
-
-  const [loading, setLoading] = useState(false);
-  const [expenses, setExpenses] = useState([]);
-  const [items, setItems] = useState([]);
-  const [opening, setOpening] = useState(0);
-  const [openingOverride, setOpeningOverride] = useState(null);
-  const [totalOverride, setTotalOverride] = useState(null);
 
   const [allDues, setAllDues] = useState([]);
   const [allDuesLoading, setAllDuesLoading] = useState(false);
@@ -471,15 +463,219 @@ export default function LedgerApp() {
   const [yearStats, setYearStats] = useState({ income: 0, expense: 0 });
   const [yearStatsLoading, setYearStatsLoading] = useState(false);
 
-  const loadedRef = useRef(false);
-  const saveTimer = useRef(null);
+  // ---- মাস-ভিত্তিক ইউনিফাইড ভিউ (উপরে এডিট প্যানেল + নিচে প্রতিদিনের বক্স) ----
+  const [monthEntries, setMonthEntries] = useState({});
+  const [monthLoading, setMonthLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const openDay = (y, m, d) => {
-    setYear(y);
-    setMonth(m);
-    setDay(d);
-    setView("day");
+  const emptyExpenseDraft = () => ({ id: null, name: "", amount: "" });
+  const emptySaleDraft = () => ({ id: null, name: "", height: "", weight: "", qty: "", price: "", due: "", discount: "" });
+
+  const [draftDay, setDraftDay] = useState(1);
+  const [draftMonth, setDraftMonth] = useState(1);
+  const [draftYear, setDraftYear] = useState(2026);
+  const [expenseDraft, setExpenseDraft] = useState(emptyExpenseDraft());
+  const [saleDraft, setSaleDraft] = useState(emptySaleDraft());
+  const [editingExpenseOrigin, setEditingExpenseOrigin] = useState(null);
+  const [editingSaleOrigin, setEditingSaleOrigin] = useState(null);
+
+  const isMeaningfulExpense = (e) => (e.name && e.name.trim()) || (e.amount !== "" && e.amount !== null && e.amount !== undefined);
+  const isMeaningfulItem = (it) =>
+    (it.name && it.name.trim()) || it.height !== "" || it.weight !== "" || it.qty !== "" || it.price !== "" || it.due !== "" || it.discount !== "";
+
+  async function computeDayFull(y, m, d) {
+    const data = await loadDay(y, m, d);
+    const expenses = data.expenses.filter(isMeaningfulExpense);
+    const items = data.items.filter(isMeaningfulItem);
+    const opening = data.openingOverride ?? (await findOpeningBalance(y, m, d));
+    const itemsTotal = items.reduce((s, it) => s + (netTotal(it) || 0), 0);
+    const duesTotalDay = items.reduce((s, it) => s + (isNaN(num(it.due)) ? 0 : num(it.due)), 0);
+    const discountTotalDay = items.reduce((s, it) => s + (isNaN(num(it.discount)) ? 0 : num(it.discount)), 0);
+    const expenseTotal = expenses.reduce((s, e) => s + (isNaN(num(e.amount)) ? 0 : num(e.amount)), 0);
+    const computedTotalMoney = opening + itemsTotal;
+    const totalMoney =
+      data.totalOverride !== null && data.totalOverride !== "" && !isNaN(num(data.totalOverride))
+        ? num(data.totalOverride)
+        : computedTotalMoney;
+    const remaining = totalMoney - expenseTotal;
+    return {
+      expenses,
+      items,
+      openingOverride: data.openingOverride,
+      totalOverride: data.totalOverride,
+      opening,
+      itemsTotal,
+      duesTotalDay,
+      discountTotalDay,
+      expenseTotal,
+      totalMoney,
+      remaining,
+    };
+  }
+
+  async function recomputeAndSaveDay(y, m, d, rawData) {
+    const expenses = rawData.expenses.filter(isMeaningfulExpense);
+    const items = rawData.items.filter(isMeaningfulItem);
+    await saveDay(y, m, d, { expenses, items, openingOverride: rawData.openingOverride ?? null, totalOverride: rawData.totalOverride ?? null });
+    const opening = (rawData.openingOverride ?? null) !== null ? num(rawData.openingOverride) : await findOpeningBalance(y, m, d);
+    const itemsTotal = items.reduce((s, it) => s + (netTotal(it) || 0), 0);
+    const expenseTotal = expenses.reduce((s, e) => s + (isNaN(num(e.amount)) ? 0 : num(e.amount)), 0);
+    const computedTotalMoney = opening + itemsTotal;
+    const totalMoney =
+      (rawData.totalOverride ?? null) !== null && rawData.totalOverride !== "" && !isNaN(num(rawData.totalOverride))
+        ? num(rawData.totalOverride)
+        : computedTotalMoney;
+    const remaining = totalMoney - expenseTotal;
+    const dueRows = items
+      .filter((it) => !isNaN(num(it.due)) && num(it.due) > 0)
+      .map((it) => ({ name: it.name || "(নামহীন)", amount: num(it.due) }));
+    await saveDuesForDate(y, m, d, dueRows);
+    await saveYearStatsForDate(y, m, d, itemsTotal, expenseTotal, remaining);
+  }
+
+  async function loadMonthEntries(y, m) {
+    const n = daysInMonth(y, m);
+    const days = Array.from({ length: n }, (_, i) => i + 1);
+    const results = await Promise.all(days.map((d) => computeDayFull(y, m, d)));
+    const obj = {};
+    days.forEach((d, i) => {
+      obj[d] = results[i];
+    });
+    return obj;
+  }
+
+  const resetDraft = (y, m) => {
+    setDraftDay(1);
+    setDraftMonth(m);
+    setDraftYear(y);
+    setExpenseDraft(emptyExpenseDraft());
+    setSaleDraft(emptySaleDraft());
+    setEditingExpenseOrigin(null);
+    setEditingSaleOrigin(null);
   };
+
+  const loadClickedExpense = (y, m, d, row) => {
+    setDraftYear(y);
+    setDraftMonth(m);
+    setDraftDay(d);
+    setExpenseDraft({ id: row.id, name: row.name, amount: row.amount });
+    setEditingExpenseOrigin({ y, m, d, id: row.id });
+  };
+
+  const loadClickedSale = (y, m, d, row) => {
+    setDraftYear(y);
+    setDraftMonth(m);
+    setDraftDay(d);
+    setSaleDraft({
+      id: row.id,
+      name: row.name,
+      height: row.height,
+      weight: row.weight,
+      qty: row.qty,
+      price: row.price,
+      due: row.due,
+      discount: row.discount,
+    });
+    setEditingSaleOrigin({ y, m, d, id: row.id });
+  };
+
+  const handleSaveDraft = async () => {
+    setSaving(true);
+    try {
+      const ty = draftYear;
+      const tm = draftMonth;
+      const td = draftDay;
+      const touched = new Set([`${ty}-${tm}-${td}`]);
+
+      // --- খরচ ড্রাফট সেভ ---
+      if (isMeaningfulExpense(expenseDraft)) {
+        const targetRaw = await loadDay(ty, tm, td);
+        let expensesArr = targetRaw.expenses.filter(isMeaningfulExpense);
+        const moved =
+          editingExpenseOrigin && (editingExpenseOrigin.y !== ty || editingExpenseOrigin.m !== tm || editingExpenseOrigin.d !== td);
+
+        if (editingExpenseOrigin && !moved) {
+          expensesArr = expensesArr.map((r) => (r.id === editingExpenseOrigin.id ? { ...expenseDraft, id: r.id } : r));
+        } else {
+          expensesArr = [...expensesArr, { ...expenseDraft, id: expenseDraft.id || emptyRowId() }];
+        }
+        await recomputeAndSaveDay(ty, tm, td, { ...targetRaw, expenses: expensesArr });
+
+        if (moved) {
+          const originRaw = await loadDay(editingExpenseOrigin.y, editingExpenseOrigin.m, editingExpenseOrigin.d);
+          const originExpenses = originRaw.expenses.filter((r) => isMeaningfulExpense(r) && r.id !== editingExpenseOrigin.id);
+          await recomputeAndSaveDay(editingExpenseOrigin.y, editingExpenseOrigin.m, editingExpenseOrigin.d, {
+            ...originRaw,
+            expenses: originExpenses,
+          });
+          touched.add(`${editingExpenseOrigin.y}-${editingExpenseOrigin.m}-${editingExpenseOrigin.d}`);
+        }
+      }
+
+      // --- বিক্রি ড্রাফট সেভ ---
+      if (isMeaningfulItem(saleDraft)) {
+        const targetRaw = await loadDay(ty, tm, td);
+        let itemsArr = targetRaw.items.filter(isMeaningfulItem);
+        const moved = editingSaleOrigin && (editingSaleOrigin.y !== ty || editingSaleOrigin.m !== tm || editingSaleOrigin.d !== td);
+
+        if (editingSaleOrigin && !moved) {
+          itemsArr = itemsArr.map((r) => (r.id === editingSaleOrigin.id ? { ...saleDraft, id: r.id } : r));
+        } else {
+          itemsArr = [...itemsArr, { ...saleDraft, id: saleDraft.id || emptyRowId() }];
+        }
+        const targetRaw2 = await loadDay(ty, tm, td);
+        await recomputeAndSaveDay(ty, tm, td, { ...targetRaw2, expenses: targetRaw2.expenses.filter(isMeaningfulExpense), items: itemsArr });
+
+        if (moved) {
+          const originRaw = await loadDay(editingSaleOrigin.y, editingSaleOrigin.m, editingSaleOrigin.d);
+          const originItems = originRaw.items.filter((r) => isMeaningfulItem(r) && r.id !== editingSaleOrigin.id);
+          await recomputeAndSaveDay(editingSaleOrigin.y, editingSaleOrigin.m, editingSaleOrigin.d, { ...originRaw, items: originItems });
+          touched.add(`${editingSaleOrigin.y}-${editingSaleOrigin.m}-${editingSaleOrigin.d}`);
+        }
+      }
+
+      if (year && month) {
+        const refreshed = await loadMonthEntries(year, month);
+        setMonthEntries(refreshed);
+      }
+      resetDraft(year || ty, month || tm);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteExpenseRow = async (y, m, d, id) => {
+    const raw = await loadDay(y, m, d);
+    const expensesArr = raw.expenses.filter((r) => isMeaningfulExpense(r) && r.id !== id);
+    await recomputeAndSaveDay(y, m, d, { ...raw, expenses: expensesArr });
+    if (year && month) setMonthEntries(await loadMonthEntries(year, month));
+  };
+
+  const deleteSaleRow = async (y, m, d, id) => {
+    const raw = await loadDay(y, m, d);
+    const itemsArr = raw.items.filter((r) => isMeaningfulItem(r) && r.id !== id);
+    await recomputeAndSaveDay(y, m, d, { ...raw, items: itemsArr });
+    if (year && month) setMonthEntries(await loadMonthEntries(year, month));
+  };
+
+  // মাসের সব দিনের ডেটা লোড
+  useEffect(() => {
+    if (view !== "days" || !year || !month) return;
+    let cancelled = false;
+    setMonthLoading(true);
+    (async () => {
+      const obj = await loadMonthEntries(year, month);
+      if (!cancelled) {
+        setMonthEntries(obj);
+        setMonthLoading(false);
+      }
+    })();
+    resetDraft(year, month);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, year, month]);
 
   // সব বছরের বাকির লিস্ট লোড (হোম পেজ + বাকির পেজে)
   useEffect(() => {
@@ -523,66 +719,6 @@ export default function LedgerApp() {
       cancelled = true;
     };
   }, [view, year]);
-
-  // দিনের ডেটা লোড
-  useEffect(() => {
-    if (view !== "day" || !year || !month || !day) return;
-    let cancelled = false;
-    loadedRef.current = false;
-    setLoading(true);
-    (async () => {
-      const data = await loadDay(year, month, day);
-      const openingAuto = data.openingOverride ?? (await findOpeningBalance(year, month, day));
-      if (cancelled) return;
-      setExpenses(data.expenses);
-      setItems(data.items);
-      setOpeningOverride(data.openingOverride);
-      setOpening(openingAuto);
-      setTotalOverride(data.totalOverride);
-      setLoading(false);
-      loadedRef.current = true;
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [view, year, month, day]);
-
-  // derived totals
-  const itemsTotal = items.reduce((s, it) => s + (netTotal(it) || 0), 0);
-  const duesTotalDay = items.reduce((s, it) => s + (isNaN(num(it.due)) ? 0 : num(it.due)), 0);
-  const discountTotalDay = items.reduce((s, it) => s + (isNaN(num(it.discount)) ? 0 : num(it.discount)), 0);
-  const expenseTotal = expenses.reduce((s, e) => s + (isNaN(num(e.amount)) ? 0 : num(e.amount)), 0);
-  const computedTotalMoney = opening + itemsTotal;
-  const totalMoney =
-    totalOverride !== null && totalOverride !== "" && !isNaN(num(totalOverride)) ? num(totalOverride) : computedTotalMoney;
-  const remaining = totalMoney - expenseTotal;
-
-  // autosave (debounced) — সরাসরি Firestore-এ যায়
-  useEffect(() => {
-    if (!loadedRef.current || view !== "day") return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      await saveDay(year, month, day, { expenses, items, openingOverride, totalOverride });
-      const dueRows = items
-        .filter((it) => !isNaN(num(it.due)) && num(it.due) > 0)
-        .map((it) => ({ name: it.name || "(নামহীন)", amount: num(it.due) }));
-      await saveDuesForDate(year, month, day, dueRows);
-      await saveYearStatsForDate(year, month, day, itemsTotal, expenseTotal, remaining);
-    }, 500);
-    return () => clearTimeout(saveTimer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expenses, items, openingOverride, totalOverride, year, month, day]);
-
-  const updateExpense = (id, field, val) =>
-    setExpenses((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: val } : r)));
-  const updateItem = (id, field, val) =>
-    setItems((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: val } : r)));
-
-  const clearDay = () => {
-    setExpenses([newExpenseRow()]);
-    setItems([newItemRow()]);
-    setOpeningOverride(null);
-  };
 
   if (checkingLock) {
     return (
@@ -789,7 +925,7 @@ export default function LedgerApp() {
           </>
         )}
 
-        {/* ---------- DAYS ---------- */}
+        {/* ---------- DAYS (unified month view: top draft panel + every day's box) ---------- */}
         {view === "days" && (
           <>
             <HeaderBar
@@ -798,20 +934,321 @@ export default function LedgerApp() {
               editMode={editMode}
               onToggleMode={toggleEditMode}
             />
-            <div className="grid grid-cols-5 gap-2 p-4 lg:grid-cols-10 lg:gap-1.5 lg:p-4 lg:max-w-xl">
-              {Array.from({ length: daysInMonth(year, month) }, (_, i) => i + 1).map((d) => (
-                <button
-                  key={d}
-                  onClick={() => openDay(year, month, d)}
-                  className="rk-day-num aspect-square flex items-center justify-center rounded-sm active:opacity-70"
-                  style={{ background: "#FFFDF7", border: "1px solid #D9CBA8", color: "#2A211B", fontFamily: "'Noto Serif Bengali', serif", fontSize: 17 }}
-                >
-                  {toBn(d)}
-                </button>
-              ))}
+
+            {!editMode && (
+              <div
+                className="mx-3 mt-3 px-3 py-2 rounded-sm flex items-center gap-2"
+                style={{ background: "#EFE3C8", color: "#7A2820", fontSize: 12 }}
+              >
+                <Eye size={13} /> ভিউ মোড — শুধু দেখা যাচ্ছে, এডিট করতে উপরে বাটনে চাপুন
+              </div>
+            )}
+
+            <div className="px-3 pt-3" style={editMode ? undefined : { pointerEvents: "none", opacity: 0.8 }}>
+              {/* ---- ড্রাফট প্যানেল: নতুন এন্ট্রি বা ক্লিক করে আনা এন্ট্রি এডিট ---- */}
+              <div className="rounded-sm mb-5" style={{ border: "1px solid #8C2F26", background: "#F3ECDD" }}>
+                <div className="flex items-center justify-center gap-2 px-3 pt-3 pb-2">
+                  <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26" }}>তারিখ</span>
+                  <select
+                    value={draftDay}
+                    onChange={(e) => setDraftDay(Number(e.target.value))}
+                    className="rounded-sm"
+                    style={{ fontSize: 11, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "3px 4px" }}
+                  >
+                    {Array.from({ length: daysInMonth(draftYear, draftMonth) }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>
+                        {toBn(d)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={draftMonth}
+                    onChange={(e) => setDraftMonth(Number(e.target.value))}
+                    className="rounded-sm"
+                    style={{ fontSize: 11, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "3px 4px" }}
+                  >
+                    {MONTH_NAMES.map((mn, i) => (
+                      <option key={mn} value={i + 1}>
+                        {mn}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={draftYear}
+                    onChange={(e) => setDraftYear(Number(e.target.value))}
+                    className="rounded-sm"
+                    style={{ fontSize: 11, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "3px 4px" }}
+                  >
+                    {YEARS.map((y) => (
+                      <option key={y} value={y}>
+                        {toBn(y)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* --- খরচ ড্রাফট --- */}
+                <div className="px-3">
+                  <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26", margin: "4px 0" }}>খরচ</p>
+                  <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
+                    <div className="grid" style={{ gridTemplateColumns: "1fr 64px", background: "#8C2F26" }}>
+                      <Th small>বিবরণ</Th>
+                      <Th right small>টাকা</Th>
+                    </div>
+                    <div className="grid items-center" style={{ gridTemplateColumns: "1fr 64px", background: "#FFFDF7" }}>
+                      <input
+                        value={expenseDraft.name}
+                        onChange={(e) => setExpenseDraft((d) => ({ ...d, name: e.target.value }))}
+                        placeholder="যেমন: নাস্তা"
+                        className="min-w-0 px-1.5 py-1.5 bg-transparent outline-none"
+                        style={{ fontSize: 12.5, color: "#2A211B" }}
+                      />
+                      <input
+                        value={expenseDraft.amount}
+                        onChange={(e) => setExpenseDraft((d) => ({ ...d, amount: e.target.value }))}
+                        inputMode="decimal"
+                        placeholder="0"
+                        className="min-w-0 w-full px-1 py-1.5 bg-transparent outline-none text-right"
+                        style={{ fontSize: 12.5, color: "#2A211B" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* --- বিক্রি ড্রাফট --- */}
+                <div className="px-3 mt-3">
+                  <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26", margin: "4px 0" }}>বিক্রি</p>
+                  <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
+                    <div className="overflow-x-auto">
+                      <div
+                        className="grid items-center"
+                        style={{ gridTemplateColumns: "70px 34px 34px 40px 34px 40px 34px 34px", background: "#B98B3E", minWidth: 340 }}
+                      >
+                        <Th small>নাম</Th>
+                        <Th right small>হাইট</Th>
+                        <Th right small>ওয়েট</Th>
+                        <Th right small>পরিমান</Th>
+                        <Th right small>দাম</Th>
+                        <Th right small>মোট</Th>
+                        <Th right small>বাকি</Th>
+                        <Th right small>ছাড়</Th>
+                      </div>
+                      <div
+                        className="grid items-center"
+                        style={{ gridTemplateColumns: "70px 34px 34px 40px 34px 40px 34px 34px", background: "#FFFDF7", minWidth: 340 }}
+                      >
+                        <input
+                          value={saleDraft.name}
+                          onChange={(e) => setSaleDraft((d) => ({ ...d, name: e.target.value }))}
+                          placeholder="নাম"
+                          className="min-w-0 px-1 py-1.5 bg-transparent outline-none"
+                          style={{ fontSize: 10.5, color: "#2A211B" }}
+                        />
+                        <input
+                          value={saleDraft.height}
+                          onChange={(e) => setSaleDraft((d) => ({ ...d, height: e.target.value }))}
+                          inputMode="decimal"
+                          placeholder="—"
+                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
+                          style={{ fontSize: 10.5, color: "#2A211B" }}
+                        />
+                        <input
+                          value={saleDraft.weight}
+                          onChange={(e) => setSaleDraft((d) => ({ ...d, weight: e.target.value }))}
+                          inputMode="decimal"
+                          placeholder="—"
+                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
+                          style={{ fontSize: 10.5, color: "#2A211B" }}
+                        />
+                        <input
+                          value={saleDraft.qty}
+                          onChange={(e) => setSaleDraft((d) => ({ ...d, qty: e.target.value }))}
+                          inputMode="decimal"
+                          placeholder="1"
+                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
+                          style={{ fontSize: 10.5, color: "#2A211B" }}
+                        />
+                        <input
+                          value={saleDraft.price}
+                          onChange={(e) => setSaleDraft((d) => ({ ...d, price: e.target.value }))}
+                          inputMode="decimal"
+                          placeholder="0"
+                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
+                          style={{ fontSize: 10.5, color: "#2A211B" }}
+                        />
+                        <div className="px-0.5 py-1.5 text-right truncate" style={{ fontSize: 10.5, color: "#5B3E1B", fontWeight: 600 }}>
+                          {fmt(netTotal(saleDraft))}
+                        </div>
+                        <input
+                          value={saleDraft.due}
+                          onChange={(e) => setSaleDraft((d) => ({ ...d, due: e.target.value }))}
+                          inputMode="decimal"
+                          placeholder="0"
+                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
+                          style={{ fontSize: 10.5, color: "#B5473C", fontWeight: 600 }}
+                        />
+                        <input
+                          value={saleDraft.discount}
+                          onChange={(e) => setSaleDraft((d) => ({ ...d, discount: e.target.value }))}
+                          inputMode="decimal"
+                          placeholder="0"
+                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
+                          style={{ fontSize: 10.5, color: "#8C6A2F", fontWeight: 600 }}
+                        />
+                      </div>
+                    </div>
+                    <p className="px-2 py-1" style={{ fontSize: 9.5, color: "#8A7A5C", background: "#F3ECDD" }}>
+                      মোট = (হাইট × ওয়েট × পরিমান × দাম) − বাকি − ছাড়।
+                    </p>
+                  </div>
+                </div>
+
+                <div className="px-3 py-3 flex gap-2">
+                  <button
+                    onClick={() => resetDraft(draftYear, draftMonth)}
+                    className="px-3 py-2 rounded-sm active:opacity-70"
+                    style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 12 }}
+                  >
+                    বাতিল
+                  </button>
+                  <button
+                    onClick={handleSaveDraft}
+                    disabled={saving}
+                    className="flex-1 py-2 rounded-sm active:opacity-80"
+                    style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 13, fontWeight: 600 }}
+                  >
+                    {saving ? "সেভ হচ্ছে…" : "সেভ করুন"}
+                  </button>
+                </div>
+              </div>
+
+              {/* ---- প্রতিদিনের বক্স ---- */}
+              {monthLoading ? (
+                <div className="flex items-center justify-center py-10" style={{ color: "#8C2F26" }}>
+                  লোড হচ্ছে…
+                </div>
+              ) : (
+                <div className="pb-10">
+                  {Array.from({ length: daysInMonth(year, month) }, (_, i) => i + 1).map((d) => {
+                    const dayData = monthEntries[d];
+                    const hasEntries = dayData && (dayData.expenses.length > 0 || dayData.items.length > 0);
+                    return (
+                      <div key={d} className="rounded-sm mb-3" style={{ border: "1px solid #D9CBA8" }}>
+                        <p
+                          className="px-3 py-2"
+                          style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26", background: "#F3ECDD", margin: 0 }}
+                        >
+                          {toBn(d)} {MONTH_NAMES[month - 1]}, {toBn(year)}
+                        </p>
+                        {!hasEntries ? (
+                          <p className="px-3 py-2" style={{ fontSize: 11, color: "#8A7A5C", margin: 0 }}>
+                            কোনো এন্ট্রি নেই
+                          </p>
+                        ) : (
+                          <>
+                            <div className="overflow-x-auto">
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10, minWidth: 480 }}>
+                                <thead>
+                                  <tr style={{ background: "#8C2F26", color: "#F3ECDD" }}>
+                                    <th style={{ padding: "3px 4px", textAlign: "left", fontWeight: 600 }}>বিবরণ</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>হাইট</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>ওয়েট</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>পরিমান</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>দাম</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>মোট</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>বাকি</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>ছাড়</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>খরচ</th>
+                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {dayData.expenses.map((row) => (
+                                    <tr
+                                      key={row.id}
+                                      onClick={() => loadClickedExpense(year, month, d, row)}
+                                      style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
+                                    >
+                                      <td style={{ padding: "4px" }}>{row.name}</td>
+                                      <td colSpan={7} style={{ padding: "4px" }}></td>
+                                      <td style={{ padding: "4px", textAlign: "right", fontWeight: 600 }}>{fmt(num(row.amount) || 0)}</td>
+                                      <td style={{ padding: "4px", textAlign: "right" }}>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteExpenseRow(year, month, d, row.id);
+                                          }}
+                                          style={{ color: "#B5473C" }}
+                                        >
+                                          <Trash2 size={11} />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {dayData.items.map((row) => (
+                                    <tr
+                                      key={row.id}
+                                      onClick={() => loadClickedSale(year, month, d, row)}
+                                      style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
+                                    >
+                                      <td style={{ padding: "4px" }}>{row.name}</td>
+                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.height || "—"}</td>
+                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.weight || "—"}</td>
+                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.qty || "১"}</td>
+                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.price || 0}</td>
+                                      <td style={{ padding: "4px", textAlign: "right", fontWeight: 600 }}>{fmt(netTotal(row))}</td>
+                                      <td style={{ padding: "4px", textAlign: "right", color: "#B5473C" }}>{row.due || 0}</td>
+                                      <td style={{ padding: "4px", textAlign: "right", color: "#8C6A2F" }}>{row.discount || 0}</td>
+                                      <td style={{ padding: "4px" }}></td>
+                                      <td style={{ padding: "4px", textAlign: "right" }}>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteSaleRow(year, month, d, row.id);
+                                          }}
+                                          style={{ color: "#B5473C" }}
+                                        >
+                                          <Trash2 size={11} />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <div style={{ minWidth: 480 }}>
+                                <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#B98B3E", color: "#F3ECDD", fontSize: 9 }}>
+                                  <span style={{ padding: "3px" }}>ইজা টাকা =</span>
+                                  <span style={{ padding: "3px" }}>বিক্রি মোট =</span>
+                                  <span style={{ padding: "3px" }}>(বাকি)</span>
+                                  <span style={{ padding: "3px" }}>(ছাড়)</span>
+                                  <span style={{ padding: "3px" }}>মোট টাকা =</span>
+                                  <span style={{ padding: "3px" }}>মোট খরচ =</span>
+                                  <span style={{ padding: "3px" }}>অবশিষ্ট =</span>
+                                </div>
+                                <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#FFFDF7", fontSize: 10, fontWeight: 600 }}>
+                                  <span style={{ padding: "3px" }}>{fmt(dayData.opening)}</span>
+                                  <span style={{ padding: "3px" }}>{fmt(dayData.itemsTotal)}</span>
+                                  <span style={{ padding: "3px", color: "#B5473C" }}>{fmt(dayData.duesTotalDay)}</span>
+                                  <span style={{ padding: "3px", color: "#8C6A2F" }}>{fmt(dayData.discountTotalDay)}</span>
+                                  <span style={{ padding: "3px" }}>{fmt(dayData.totalMoney)}</span>
+                                  <span style={{ padding: "3px", color: "#B5473C" }}>{fmt(dayData.expenseTotal)}</span>
+                                  <span style={{ padding: "3px", fontWeight: 700, color: "#7A2820" }}>{fmt(dayData.remaining)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </>
         )}
+
 
         {/* ---------- DAY DETAIL ---------- */}
         {view === "day" && (
