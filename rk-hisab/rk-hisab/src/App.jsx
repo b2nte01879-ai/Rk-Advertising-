@@ -1136,7 +1136,7 @@ export default function LedgerApp() {
                       <div key={d} className="rounded-sm mb-3" style={{ border: "1px solid #D9CBA8" }}>
                         <p
                           className="px-3 py-2"
-                          style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26", background: "#F3ECDD", margin: 0 }}
+                          style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#8C2F26", background: "#F3ECDD", margin: 0 }}
                         >
                           {toBn(d)} {MONTH_NAMES[month - 1]}, {toBn(year)}
                         </p>
@@ -1146,99 +1146,131 @@ export default function LedgerApp() {
                           </p>
                         ) : (
                           <>
-                            <div className="overflow-x-auto">
-                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10, minWidth: 480 }}>
+                          <div className="flex flex-col lg:flex-row">
+                            {/* ---- বিক্রি (৭০%) ---- */}
+                            <div className="lg:w-[70%] overflow-x-auto" style={{ borderRight: "1px solid #D9CBA8" }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 420 }}>
                                 <thead>
                                   <tr style={{ background: "#8C2F26", color: "#F3ECDD" }}>
-                                    <th style={{ padding: "3px 4px", textAlign: "left", fontWeight: 600 }}>বিবরণ</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>হাইট</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>ওয়েট</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>পরিমান</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>দাম</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>মোট</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>বাকি</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>ছাড়</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}>খরচ</th>
-                                    <th style={{ padding: "3px 4px", textAlign: "right", fontWeight: 600 }}></th>
+                                    <th style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>নাম</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>হাইট</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>ওয়েট</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>পরিমান</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>দাম</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>মোট</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>বাকি</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>ছাড়</th>
+                                    <th style={{ padding: "5px 6px" }}></th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {dayData.expenses.map((row) => (
-                                    <tr
-                                      key={row.id}
-                                      onClick={() => loadClickedExpense(year, month, d, row)}
-                                      style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
-                                    >
-                                      <td style={{ padding: "4px" }}>{row.name}</td>
-                                      <td colSpan={7} style={{ padding: "4px" }}></td>
-                                      <td style={{ padding: "4px", textAlign: "right", fontWeight: 600 }}>{fmt(num(row.amount) || 0)}</td>
-                                      <td style={{ padding: "4px", textAlign: "right" }}>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            deleteExpenseRow(year, month, d, row.id);
-                                          }}
-                                          style={{ color: "#B5473C" }}
-                                        >
-                                          <Trash2 size={11} />
-                                        </button>
+                                  {dayData.items.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={9} style={{ padding: "6px", fontSize: 12, color: "#8A7A5C", background: "#FFFDF7" }}>
+                                        কোনো বিক্রি নেই
                                       </td>
                                     </tr>
-                                  ))}
-                                  {dayData.items.map((row) => (
-                                    <tr
-                                      key={row.id}
-                                      onClick={() => loadClickedSale(year, month, d, row)}
-                                      style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
-                                    >
-                                      <td style={{ padding: "4px" }}>{row.name}</td>
-                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.height || "—"}</td>
-                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.weight || "—"}</td>
-                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.qty || "১"}</td>
-                                      <td style={{ padding: "4px", textAlign: "right" }}>{row.price || 0}</td>
-                                      <td style={{ padding: "4px", textAlign: "right", fontWeight: 600 }}>{fmt(netTotal(row))}</td>
-                                      <td style={{ padding: "4px", textAlign: "right", color: "#B5473C" }}>{row.due || 0}</td>
-                                      <td style={{ padding: "4px", textAlign: "right", color: "#8C6A2F" }}>{row.discount || 0}</td>
-                                      <td style={{ padding: "4px" }}></td>
-                                      <td style={{ padding: "4px", textAlign: "right" }}>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            deleteSaleRow(year, month, d, row.id);
-                                          }}
-                                          style={{ color: "#B5473C" }}
-                                        >
-                                          <Trash2 size={11} />
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  ))}
+                                  ) : (
+                                    dayData.items.map((row) => (
+                                      <tr
+                                        key={row.id}
+                                        onClick={() => loadClickedSale(year, month, d, row)}
+                                        style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
+                                      >
+                                        <td style={{ padding: "5px 6px" }}>{row.name}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.height || "—"}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.weight || "—"}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.qty || "১"}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.price || 0}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>{fmt(netTotal(row))}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#B5473C" }}>{row.due || 0}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#8C6A2F" }}>{row.discount || 0}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              deleteSaleRow(year, month, d, row.id);
+                                            }}
+                                            style={{ color: "#B5473C" }}
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))
+                                  )}
                                 </tbody>
                               </table>
                             </div>
-                            <div className="overflow-x-auto">
-                              <div style={{ minWidth: 480 }}>
-                                <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#B98B3E", color: "#F3ECDD", fontSize: 9 }}>
-                                  <span style={{ padding: "3px" }}>ইজা টাকা =</span>
-                                  <span style={{ padding: "3px" }}>বিক্রি মোট =</span>
-                                  <span style={{ padding: "3px" }}>(বাকি)</span>
-                                  <span style={{ padding: "3px" }}>(ছাড়)</span>
-                                  <span style={{ padding: "3px" }}>মোট টাকা =</span>
-                                  <span style={{ padding: "3px" }}>মোট খরচ =</span>
-                                  <span style={{ padding: "3px" }}>অবশিষ্ট =</span>
-                                </div>
-                                <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#FFFDF7", fontSize: 10, fontWeight: 600 }}>
-                                  <span style={{ padding: "3px" }}>{fmt(dayData.opening)}</span>
-                                  <span style={{ padding: "3px" }}>{fmt(dayData.itemsTotal)}</span>
-                                  <span style={{ padding: "3px", color: "#B5473C" }}>{fmt(dayData.duesTotalDay)}</span>
-                                  <span style={{ padding: "3px", color: "#8C6A2F" }}>{fmt(dayData.discountTotalDay)}</span>
-                                  <span style={{ padding: "3px" }}>{fmt(dayData.totalMoney)}</span>
-                                  <span style={{ padding: "3px", color: "#B5473C" }}>{fmt(dayData.expenseTotal)}</span>
-                                  <span style={{ padding: "3px", fontWeight: 700, color: "#7A2820" }}>{fmt(dayData.remaining)}</span>
-                                </div>
+
+                            {/* ---- খরচ (৩০%) ---- */}
+                            <div className="lg:w-[30%] overflow-x-auto">
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 180 }}>
+                                <thead>
+                                  <tr style={{ background: "#B98B3E", color: "#F3ECDD" }}>
+                                    <th style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>খরচ</th>
+                                    <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>টাকা</th>
+                                    <th style={{ padding: "5px 6px" }}></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {dayData.expenses.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={3} style={{ padding: "6px", fontSize: 12, color: "#8A7A5C", background: "#FFFDF7" }}>
+                                        কোনো খরচ নেই
+                                      </td>
+                                    </tr>
+                                  ) : (
+                                    dayData.expenses.map((row) => (
+                                      <tr
+                                        key={row.id}
+                                        onClick={() => loadClickedExpense(year, month, d, row)}
+                                        style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
+                                      >
+                                        <td style={{ padding: "5px 6px" }}>{row.name}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>{fmt(num(row.amount) || 0)}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              deleteExpenseRow(year, month, d, row.id);
+                                            }}
+                                            style={{ color: "#B5473C" }}
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <div style={{ minWidth: 560 }}>
+                              <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#B98B3E", color: "#F3ECDD", fontSize: 11 }}>
+                                <span style={{ padding: "5px 4px" }}>ইজা টাকা =</span>
+                                <span style={{ padding: "5px 4px" }}>বিক্রি মোট =</span>
+                                <span style={{ padding: "5px 4px" }}>(বাকি)</span>
+                                <span style={{ padding: "5px 4px" }}>(ছাড়)</span>
+                                <span style={{ padding: "5px 4px" }}>মোট টাকা =</span>
+                                <span style={{ padding: "5px 4px" }}>মোট খরচ =</span>
+                                <span style={{ padding: "5px 4px" }}>অবশিষ্ট =</span>
+                              </div>
+                              <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#FFFDF7", fontSize: 12.5, fontWeight: 700 }}>
+                                <span style={{ padding: "5px 4px" }}>{fmt(dayData.opening)}</span>
+                                <span style={{ padding: "5px 4px" }}>{fmt(dayData.itemsTotal)}</span>
+                                <span style={{ padding: "5px 4px", color: "#B5473C" }}>{fmt(dayData.duesTotalDay)}</span>
+                                <span style={{ padding: "5px 4px", color: "#8C6A2F" }}>{fmt(dayData.discountTotalDay)}</span>
+                                <span style={{ padding: "5px 4px" }}>{fmt(dayData.totalMoney)}</span>
+                                <span style={{ padding: "5px 4px", color: "#B5473C" }}>{fmt(dayData.expenseTotal)}</span>
+                                <span style={{ padding: "5px 4px", fontWeight: 700, color: "#7A2820" }}>{fmt(dayData.remaining)}</span>
                               </div>
                             </div>
-                          </>
+                          </div>
+                        </>
                         )}
                       </div>
                     );
