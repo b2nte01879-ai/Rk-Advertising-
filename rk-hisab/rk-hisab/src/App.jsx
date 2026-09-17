@@ -474,10 +474,19 @@ export default function LedgerApp() {
   const [draftDay, setDraftDay] = useState(1);
   const [draftMonth, setDraftMonth] = useState(1);
   const [draftYear, setDraftYear] = useState(2026);
-  const [expenseDraft, setExpenseDraft] = useState(emptyExpenseDraft());
-  const [saleDraft, setSaleDraft] = useState(emptySaleDraft());
+  const [expenseDrafts, setExpenseDrafts] = useState([emptyExpenseDraft()]);
+  const [saleDrafts, setSaleDrafts] = useState([emptySaleDraft()]);
   const [editingExpenseOrigin, setEditingExpenseOrigin] = useState(null);
   const [editingSaleOrigin, setEditingSaleOrigin] = useState(null);
+
+  const updateExpenseDraft = (idx, field, val) =>
+    setExpenseDrafts((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: val } : r)));
+  const updateSaleDraft = (idx, field, val) =>
+    setSaleDrafts((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: val } : r)));
+  const removeExpenseDraftRow = (idx) =>
+    setExpenseDrafts((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== idx) : [emptyExpenseDraft()]));
+  const removeSaleDraftRow = (idx) =>
+    setSaleDrafts((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== idx) : [emptySaleDraft()]));
 
   const isMeaningfulExpense = (e) => (e.name && e.name.trim()) || (e.amount !== "" && e.amount !== null && e.amount !== undefined);
   const isMeaningfulItem = (it) =>
@@ -548,8 +557,8 @@ export default function LedgerApp() {
     setDraftDay(1);
     setDraftMonth(m);
     setDraftYear(y);
-    setExpenseDraft(emptyExpenseDraft());
-    setSaleDraft(emptySaleDraft());
+    setExpenseDrafts([emptyExpenseDraft()]);
+    setSaleDrafts([emptySaleDraft()]);
     setEditingExpenseOrigin(null);
     setEditingSaleOrigin(null);
   };
@@ -558,7 +567,7 @@ export default function LedgerApp() {
     setDraftYear(y);
     setDraftMonth(m);
     setDraftDay(d);
-    setExpenseDraft({ id: row.id, name: row.name, amount: row.amount });
+    setExpenseDrafts([{ id: row.id, name: row.name, amount: row.amount }]);
     setEditingExpenseOrigin({ y, m, d, id: row.id });
   };
 
@@ -566,16 +575,18 @@ export default function LedgerApp() {
     setDraftYear(y);
     setDraftMonth(m);
     setDraftDay(d);
-    setSaleDraft({
-      id: row.id,
-      name: row.name,
-      height: row.height,
-      weight: row.weight,
-      qty: row.qty,
-      price: row.price,
-      due: row.due,
-      discount: row.discount,
-    });
+    setSaleDrafts([
+      {
+        id: row.id,
+        name: row.name,
+        height: row.height,
+        weight: row.weight,
+        qty: row.qty,
+        price: row.price,
+        due: row.due,
+        discount: row.discount,
+      },
+    ]);
     setEditingSaleOrigin({ y, m, d, id: row.id });
   };
 
@@ -587,18 +598,24 @@ export default function LedgerApp() {
       const td = draftDay;
       const touched = new Set([`${ty}-${tm}-${td}`]);
 
-      // --- খরচ ড্রাফট সেভ ---
-      if (isMeaningfulExpense(expenseDraft)) {
+      const meaningfulExpenseDrafts = expenseDrafts.filter(isMeaningfulExpense);
+      const meaningfulSaleDrafts = saleDrafts.filter(isMeaningfulItem);
+
+      // --- খরচ ড্রাফট(গুলো) সেভ ---
+      if (meaningfulExpenseDrafts.length > 0) {
         const targetRaw = await loadDay(ty, tm, td);
         let expensesArr = targetRaw.expenses.filter(isMeaningfulExpense);
         const moved =
           editingExpenseOrigin && (editingExpenseOrigin.y !== ty || editingExpenseOrigin.m !== tm || editingExpenseOrigin.d !== td);
 
-        if (editingExpenseOrigin && !moved) {
-          expensesArr = expensesArr.map((r) => (r.id === editingExpenseOrigin.id ? { ...expenseDraft, id: r.id } : r));
-        } else {
-          expensesArr = [...expensesArr, { ...expenseDraft, id: expenseDraft.id || emptyRowId() }];
-        }
+        meaningfulExpenseDrafts.forEach((draftRow) => {
+          const isTheEditedRow = editingExpenseOrigin && draftRow.id === editingExpenseOrigin.id;
+          if (isTheEditedRow && !moved) {
+            expensesArr = expensesArr.map((r) => (r.id === editingExpenseOrigin.id ? { ...draftRow, id: r.id } : r));
+          } else {
+            expensesArr = [...expensesArr, { ...draftRow, id: draftRow.id && !isTheEditedRow ? draftRow.id : emptyRowId() }];
+          }
+        });
         await recomputeAndSaveDay(ty, tm, td, { ...targetRaw, expenses: expensesArr });
 
         if (moved) {
@@ -612,17 +629,20 @@ export default function LedgerApp() {
         }
       }
 
-      // --- বিক্রি ড্রাফট সেভ ---
-      if (isMeaningfulItem(saleDraft)) {
+      // --- বিক্রি ড্রাফট(গুলো) সেভ ---
+      if (meaningfulSaleDrafts.length > 0) {
         const targetRaw = await loadDay(ty, tm, td);
         let itemsArr = targetRaw.items.filter(isMeaningfulItem);
         const moved = editingSaleOrigin && (editingSaleOrigin.y !== ty || editingSaleOrigin.m !== tm || editingSaleOrigin.d !== td);
 
-        if (editingSaleOrigin && !moved) {
-          itemsArr = itemsArr.map((r) => (r.id === editingSaleOrigin.id ? { ...saleDraft, id: r.id } : r));
-        } else {
-          itemsArr = [...itemsArr, { ...saleDraft, id: saleDraft.id || emptyRowId() }];
-        }
+        meaningfulSaleDrafts.forEach((draftRow) => {
+          const isTheEditedRow = editingSaleOrigin && draftRow.id === editingSaleOrigin.id;
+          if (isTheEditedRow && !moved) {
+            itemsArr = itemsArr.map((r) => (r.id === editingSaleOrigin.id ? { ...draftRow, id: r.id } : r));
+          } else {
+            itemsArr = [...itemsArr, { ...draftRow, id: draftRow.id && !isTheEditedRow ? draftRow.id : emptyRowId() }];
+          }
+        });
         const targetRaw2 = await loadDay(ty, tm, td);
         await recomputeAndSaveDay(ty, tm, td, { ...targetRaw2, expenses: targetRaw2.expenses.filter(isMeaningfulExpense), items: itemsArr });
 
@@ -948,12 +968,12 @@ export default function LedgerApp() {
               {/* ---- ড্রাফট প্যানেল: নতুন এন্ট্রি বা ক্লিক করে আনা এন্ট্রি এডিট ---- */}
               <div className="rounded-sm mb-5" style={{ border: "1px solid #8C2F26", background: "#F3ECDD" }}>
                 <div className="flex items-center justify-center gap-2 px-3 pt-3 pb-2">
-                  <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26" }}>তারিখ</span>
+                  <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26" }}>তারিখ</span>
                   <select
                     value={draftDay}
                     onChange={(e) => setDraftDay(Number(e.target.value))}
                     className="rounded-sm"
-                    style={{ fontSize: 11, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "3px 4px" }}
+                    style={{ fontSize: 13, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "4px 5px" }}
                   >
                     {Array.from({ length: daysInMonth(draftYear, draftMonth) }, (_, i) => i + 1).map((d) => (
                       <option key={d} value={d}>
@@ -965,7 +985,7 @@ export default function LedgerApp() {
                     value={draftMonth}
                     onChange={(e) => setDraftMonth(Number(e.target.value))}
                     className="rounded-sm"
-                    style={{ fontSize: 11, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "3px 4px" }}
+                    style={{ fontSize: 13, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "4px 5px" }}
                   >
                     {MONTH_NAMES.map((mn, i) => (
                       <option key={mn} value={i + 1}>
@@ -977,7 +997,7 @@ export default function LedgerApp() {
                     value={draftYear}
                     onChange={(e) => setDraftYear(Number(e.target.value))}
                     className="rounded-sm"
-                    style={{ fontSize: 11, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "3px 4px" }}
+                    style={{ fontSize: 13, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "4px 5px" }}
                   >
                     {YEARS.map((y) => (
                       <option key={y} value={y}>
@@ -987,119 +1007,161 @@ export default function LedgerApp() {
                   </select>
                 </div>
 
-                {/* --- খরচ ড্রাফট --- */}
-                <div className="px-3">
-                  <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26", margin: "4px 0" }}>খরচ</p>
-                  <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
-                    <div className="grid" style={{ gridTemplateColumns: "1fr 64px", background: "#8C2F26" }}>
-                      <Th small>বিবরণ</Th>
-                      <Th right small>টাকা</Th>
-                    </div>
-                    <div className="grid items-center" style={{ gridTemplateColumns: "1fr 64px", background: "#FFFDF7" }}>
-                      <input
-                        value={expenseDraft.name}
-                        onChange={(e) => setExpenseDraft((d) => ({ ...d, name: e.target.value }))}
-                        placeholder="যেমন: নাস্তা"
-                        className="min-w-0 px-1.5 py-1.5 bg-transparent outline-none"
-                        style={{ fontSize: 12.5, color: "#2A211B" }}
-                      />
-                      <input
-                        value={expenseDraft.amount}
-                        onChange={(e) => setExpenseDraft((d) => ({ ...d, amount: e.target.value }))}
-                        inputMode="decimal"
-                        placeholder="0"
-                        className="min-w-0 w-full px-1 py-1.5 bg-transparent outline-none text-right"
-                        style={{ fontSize: 12.5, color: "#2A211B" }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* --- বিক্রি ড্রাফট --- */}
-                <div className="px-3 mt-3">
-                  <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#8C2F26", margin: "4px 0" }}>বিক্রি</p>
-                  <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
-                    <div className="overflow-x-auto">
-                      <div
-                        className="grid items-center"
-                        style={{ gridTemplateColumns: "70px 34px 34px 40px 34px 40px 34px 34px", background: "#B98B3E", minWidth: 340 }}
-                      >
-                        <Th small>নাম</Th>
-                        <Th right small>হাইট</Th>
-                        <Th right small>ওয়েট</Th>
-                        <Th right small>পরিমান</Th>
-                        <Th right small>দাম</Th>
-                        <Th right small>মোট</Th>
-                        <Th right small>বাকি</Th>
-                        <Th right small>ছাড়</Th>
-                      </div>
-                      <div
-                        className="grid items-center"
-                        style={{ gridTemplateColumns: "70px 34px 34px 40px 34px 40px 34px 34px", background: "#FFFDF7", minWidth: 340 }}
-                      >
-                        <input
-                          value={saleDraft.name}
-                          onChange={(e) => setSaleDraft((d) => ({ ...d, name: e.target.value }))}
-                          placeholder="নাম"
-                          className="min-w-0 px-1 py-1.5 bg-transparent outline-none"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={saleDraft.height}
-                          onChange={(e) => setSaleDraft((d) => ({ ...d, height: e.target.value }))}
-                          inputMode="decimal"
-                          placeholder="—"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={saleDraft.weight}
-                          onChange={(e) => setSaleDraft((d) => ({ ...d, weight: e.target.value }))}
-                          inputMode="decimal"
-                          placeholder="—"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={saleDraft.qty}
-                          onChange={(e) => setSaleDraft((d) => ({ ...d, qty: e.target.value }))}
-                          inputMode="decimal"
-                          placeholder="1"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={saleDraft.price}
-                          onChange={(e) => setSaleDraft((d) => ({ ...d, price: e.target.value }))}
-                          inputMode="decimal"
-                          placeholder="0"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <div className="px-0.5 py-1.5 text-right truncate" style={{ fontSize: 10.5, color: "#5B3E1B", fontWeight: 600 }}>
-                          {fmt(netTotal(saleDraft))}
+                <div className="flex flex-col lg:flex-row">
+                  {/* --- বিক্রি ড্রাফট (৭০%, একাধিক সারি) --- */}
+                  <div className="px-3 lg:w-[70%]">
+                    <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26", margin: "4px 0" }}>বিক্রি</p>
+                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
+                      <div className="overflow-x-auto">
+                        <div
+                          className="grid items-center"
+                          style={{ gridTemplateColumns: "100px 48px 48px 56px 48px 56px 48px 48px 24px", background: "#B98B3E", minWidth: 460 }}
+                        >
+                          <Th>নাম</Th>
+                          <Th right>হাইট</Th>
+                          <Th right>ওয়েট</Th>
+                          <Th right>পরিমান</Th>
+                          <Th right>দাম</Th>
+                          <Th right>মোট</Th>
+                          <Th right>বাকি</Th>
+                          <Th right>ছাড়</Th>
+                          <Th />
                         </div>
-                        <input
-                          value={saleDraft.due}
-                          onChange={(e) => setSaleDraft((d) => ({ ...d, due: e.target.value }))}
-                          inputMode="decimal"
-                          placeholder="0"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#B5473C", fontWeight: 600 }}
-                        />
-                        <input
-                          value={saleDraft.discount}
-                          onChange={(e) => setSaleDraft((d) => ({ ...d, discount: e.target.value }))}
-                          inputMode="decimal"
-                          placeholder="0"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#8C6A2F", fontWeight: 600 }}
-                        />
+                        {saleDrafts.map((row, idx) => (
+                          <div
+                            key={idx}
+                            className="grid items-center"
+                            style={{
+                              gridTemplateColumns: "100px 48px 48px 56px 48px 56px 48px 48px 24px",
+                              background: "#FFFDF7",
+                              minWidth: 460,
+                              borderTop: idx > 0 ? "1px solid #EADFC4" : "none",
+                            }}
+                          >
+                            <input
+                              value={row.name}
+                              onChange={(e) => updateSaleDraft(idx, "name", e.target.value)}
+                              placeholder="নাম"
+                              className="min-w-0 px-1.5 py-2 bg-transparent outline-none"
+                              style={{ fontSize: 14, color: "#2A211B" }}
+                            />
+                            <input
+                              value={row.height}
+                              onChange={(e) => updateSaleDraft(idx, "height", e.target.value)}
+                              inputMode="decimal"
+                              placeholder="—"
+                              className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
+                              style={{ fontSize: 14, color: "#2A211B" }}
+                            />
+                            <input
+                              value={row.weight}
+                              onChange={(e) => updateSaleDraft(idx, "weight", e.target.value)}
+                              inputMode="decimal"
+                              placeholder="—"
+                              className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
+                              style={{ fontSize: 14, color: "#2A211B" }}
+                            />
+                            <input
+                              value={row.qty}
+                              onChange={(e) => updateSaleDraft(idx, "qty", e.target.value)}
+                              inputMode="decimal"
+                              placeholder="1"
+                              className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
+                              style={{ fontSize: 14, color: "#2A211B" }}
+                            />
+                            <input
+                              value={row.price}
+                              onChange={(e) => updateSaleDraft(idx, "price", e.target.value)}
+                              inputMode="decimal"
+                              placeholder="0"
+                              className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
+                              style={{ fontSize: 14, color: "#2A211B" }}
+                            />
+                            <div className="px-1 py-2 text-right truncate" style={{ fontSize: 14, color: "#5B3E1B", fontWeight: 700 }}>
+                              {fmt(netTotal(row))}
+                            </div>
+                            <input
+                              value={row.due}
+                              onChange={(e) => updateSaleDraft(idx, "due", e.target.value)}
+                              inputMode="decimal"
+                              placeholder="0"
+                              className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
+                              style={{ fontSize: 14, color: "#B5473C", fontWeight: 600 }}
+                            />
+                            <input
+                              value={row.discount}
+                              onChange={(e) => updateSaleDraft(idx, "discount", e.target.value)}
+                              inputMode="decimal"
+                              placeholder="0"
+                              className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
+                              style={{ fontSize: 14, color: "#8C6A2F", fontWeight: 600 }}
+                            />
+                            <button
+                              onClick={() => removeSaleDraftRow(idx)}
+                              className="flex items-center justify-center h-full"
+                              style={{ color: "#B5473C" }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        ))}
                       </div>
+                      <p className="px-2 py-1.5" style={{ fontSize: 12, color: "#8A7A5C", background: "#F3ECDD" }}>
+                        মোট = (হাইট × ওয়েট × পরিমান × দাম) − বাকি − ছাড়।
+                      </p>
                     </div>
-                    <p className="px-2 py-1" style={{ fontSize: 9.5, color: "#8A7A5C", background: "#F3ECDD" }}>
-                      মোট = (হাইট × ওয়েট × পরিমান × দাম) − বাকি − ছাড়।
-                    </p>
+                    <button
+                      onClick={() => setSaleDrafts((rows) => [...rows, emptySaleDraft()])}
+                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-sm active:opacity-70"
+                      style={{ background: "#F3ECDD", color: "#8C2F26", fontSize: 14, border: "1px dashed #D9CBA8" }}
+                    >
+                      <Plus size={15} /> বিক্রি যোগ করুন
+                    </button>
+                  </div>
+
+                  {/* --- খরচ ড্রাফট (৩০%, একাধিক সারি) --- */}
+                  <div className="px-3 mt-3 lg:mt-0 lg:w-[30%]">
+                    <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26", margin: "4px 0" }}>খরচ</p>
+                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
+                      <div className="grid" style={{ gridTemplateColumns: "1fr 70px 24px", background: "#8C2F26" }}>
+                        <Th>বিবরণ</Th>
+                        <Th right>টাকা</Th>
+                        <Th />
+                      </div>
+                      {expenseDrafts.map((row, idx) => (
+                        <div
+                          key={idx}
+                          className="grid items-center"
+                          style={{ gridTemplateColumns: "1fr 70px 24px", background: "#FFFDF7", borderTop: idx > 0 ? "1px solid #EADFC4" : "none" }}
+                        >
+                          <input
+                            value={row.name}
+                            onChange={(e) => updateExpenseDraft(idx, "name", e.target.value)}
+                            placeholder="যেমন: নাস্তা"
+                            className="min-w-0 px-2 py-2 bg-transparent outline-none"
+                            style={{ fontSize: 15, color: "#2A211B" }}
+                          />
+                          <input
+                            value={row.amount}
+                            onChange={(e) => updateExpenseDraft(idx, "amount", e.target.value)}
+                            inputMode="decimal"
+                            placeholder="0"
+                            className="min-w-0 w-full px-1 py-2 bg-transparent outline-none text-right"
+                            style={{ fontSize: 15, color: "#2A211B" }}
+                          />
+                          <button onClick={() => removeExpenseDraftRow(idx)} className="flex items-center justify-center h-full" style={{ color: "#B5473C" }}>
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setExpenseDrafts((rows) => [...rows, emptyExpenseDraft()])}
+                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-sm active:opacity-70"
+                      style={{ background: "#F3ECDD", color: "#8C2F26", fontSize: 14, border: "1px dashed #D9CBA8" }}
+                    >
+                      <Plus size={15} /> খরচ যোগ করুন
+                    </button>
                   </div>
                 </div>
 
