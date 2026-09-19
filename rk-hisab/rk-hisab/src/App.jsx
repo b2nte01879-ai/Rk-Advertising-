@@ -471,9 +471,18 @@ export default function LedgerApp() {
   const emptyExpenseDraft = () => ({ id: null, name: "", amount: "" });
   const emptySaleDraft = () => ({ id: null, name: "", height: "", weight: "", qty: "", price: "", due: "", discount: "" });
 
-  const [draftDay, setDraftDay] = useState(1);
-  const [draftMonth, setDraftMonth] = useState(1);
-  const [draftYear, setDraftYear] = useState(2026);
+  const getTodayDefaultDay = (y, m) => {
+    const now = new Date();
+    if (now.getFullYear() === y && now.getMonth() + 1 === m) return now.getDate();
+    return 1;
+  };
+  const _today = new Date();
+  const _initYear = YEARS.includes(_today.getFullYear()) ? _today.getFullYear() : YEARS[0];
+  const _initMonth = _today.getMonth() + 1;
+
+  const [draftDay, setDraftDay] = useState(getTodayDefaultDay(_initYear, _initMonth));
+  const [draftMonth, setDraftMonth] = useState(_initMonth);
+  const [draftYear, setDraftYear] = useState(_initYear);
   const [expenseDrafts, setExpenseDrafts] = useState([emptyExpenseDraft()]);
   const [saleDrafts, setSaleDrafts] = useState([emptySaleDraft()]);
   const [editingExpenseOrigin, setEditingExpenseOrigin] = useState(null);
@@ -554,7 +563,7 @@ export default function LedgerApp() {
   }
 
   const resetDraft = (y, m) => {
-    setDraftDay(1);
+    setDraftDay(getTodayDefaultDay(y, m));
     setDraftMonth(m);
     setDraftYear(y);
     setExpenseDrafts([emptyExpenseDraft()]);
