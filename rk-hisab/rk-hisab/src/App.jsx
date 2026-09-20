@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, ChevronLeft, BookOpen, Pencil, Eye, Download } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, BookOpen, Pencil, Eye, Download, Search, Printer } from "lucide-react";
 import { storage } from "./firebase";
 
 // ---------- constants ----------
@@ -223,6 +223,40 @@ async function buildBackupCsv() {
   }
 
   return rows.map((r) => r.map(csvEscape).join(",")).join("\n");
+}
+
+async function buildAllTransactions() {
+  const rows = [];
+  for (const y of YEARS) {
+    const stats = await loadYearStats(y);
+    const dateKeys = Object.keys(stats).sort((a, b) => {
+      const [am, ad] = a.split("-").map(Number);
+      const [bm, bd] = b.split("-").map(Number);
+      return am - bm || ad - bd;
+    });
+    for (const dk of dateKeys) {
+      const [m, d] = dk.split("-").map(Number);
+      const day = await loadDay(y, m, d);
+      day.expenses.forEach((e) => {
+        if (!e.name && !e.amount) return;
+        rows.push({ y, m, d, type: "খরচ", name: e.name || "(নামহীন)", amount: num(e.amount) || 0, due: 0, discount: 0 });
+      });
+      day.items.forEach((it) => {
+        if (!it.name && !it.height && !it.weight && !it.qty && !it.price && !it.due && !it.discount) return;
+        rows.push({
+          y,
+          m,
+          d,
+          type: "বিক্রি",
+          name: it.name || "(নামহীন)",
+          amount: netTotal(it),
+          due: num(it.due) || 0,
+          discount: num(it.discount) || 0,
+        });
+      });
+    }
+  }
+  return rows;
 }
 
 async function downloadBackupCsv(onDone) {
@@ -458,6 +492,11 @@ export default function LedgerApp() {
 
   const [allDues, setAllDues] = useState([]);
   const [allDuesLoading, setAllDuesLoading] = useState(false);
+  const [todaySummary, setTodaySummary] = useState(null);
+  const [todayLoading, setTodayLoading] = useState(false);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerData, setLedgerData] = useState([]);
+  const [ledgerQuery, setLedgerQuery] = useState("");
   const [backingUp, setBackingUp] = useState(false);
 
   const [yearStats, setYearStats] = useState({ income: 0, expense: 0 });
@@ -561,6 +600,51 @@ export default function LedgerApp() {
     });
     return obj;
   }
+
+  const printMonthReport = (y, m, entries) => {
+    const days = Object.keys(entries)
+      .map(Number)
+      .sort((a, b) => a - b);
+    const rows = days
+      .map((d) => {
+        const e = entries[d];
+        return `<tr><td>${toBn(d)}</td><td style="text-align:right">${fmt(e.itemsTotal)}</td><td style="text-align:right">${fmt(
+          e.expenseTotal
+        )}</td><td style="text-align:right">${fmt(e.remaining)}</td></tr>`;
+      })
+      .join("");
+    const totalIncome = days.reduce((s, d) => s + entries[d].itemsTotal, 0);
+    const totalExpense = days.reduce((s, d) => s + entries[d].expenseTotal, 0);
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(`
+      <html><head><title>${MONTH_NAMES[m - 1]} ${y} - R.K Advertising</title>
+      <meta charset="utf-8" />
+      <style>
+        body{font-family:'Noto Sans Bengali',sans-serif;padding:24px;color:#2A211B;}
+        h1{color:#8C2F26;font-size:18px;margin-bottom:2px;}
+        p.sub{color:#6B5D4A;font-size:12px;margin-top:0;}
+        table{width:100%;border-collapse:collapse;margin-top:14px;}
+        th,td{border:1px solid #D9CBA8;padding:6px 10px;font-size:13px;}
+        th{background:#8C2F26;color:#fff;text-align:left;}
+        tfoot td{font-weight:bold;background:#EFE3C8;}
+      </style>
+      </head><body>
+      <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
+      <p class="sub">মাসিক রিপোর্ট — ${MONTH_NAMES[m - 1]}, ${toBn(y)}</p>
+      <table>
+        <thead><tr><th>তারিখ</th><th>আয়</th><th>খরচ</th><th>অবশিষ্ট</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>মোট</td><td>${fmt(totalIncome)}</td><td>${fmt(totalExpense)}</td><td>${fmt(
+      totalIncome - totalExpense
+    )}</td></tr></tfoot>
+      </table>
+      </body></html>
+    `);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
+  };
 
   const resetDraft = (y, m) => {
     setDraftDay(getTodayDefaultDay(y, m));
@@ -732,6 +816,48 @@ export default function LedgerApp() {
     };
   }, [view]);
 
+  // আজকের সংক্ষিপ্ত হিসাব (হোম পেজে)
+  useEffect(() => {
+    if (view !== "years") return;
+    let cancelled = false;
+    const now = new Date();
+    const ty = now.getFullYear();
+    const tm = now.getMonth() + 1;
+    const td = now.getDate();
+    if (!YEARS.includes(ty)) {
+      setTodaySummary(null);
+      return;
+    }
+    setTodayLoading(true);
+    (async () => {
+      const full = await computeDayFull(ty, tm, td);
+      if (!cancelled) {
+        setTodaySummary({ y: ty, m: tm, d: td, ...full });
+        setTodayLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
+
+  // গ্রাহক লেজার / এন্ট্রি খোঁজার ডেটা লোড
+  useEffect(() => {
+    if (view !== "ledger") return;
+    let cancelled = false;
+    setLedgerLoading(true);
+    (async () => {
+      const rows = await buildAllTransactions();
+      if (!cancelled) {
+        setLedgerData(rows);
+        setLedgerLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
+
   // বছরের সারাংশ লোড
   useEffect(() => {
     if (view !== "months" || !year) return;
@@ -831,6 +957,28 @@ export default function LedgerApp() {
               </button>
             </div>
 
+            {todaySummary && (
+              <div className="px-3 pt-3">
+                <SectionTitle label="আজকের হিসাব" />
+                <div className="rounded-sm overflow-hidden mb-1" style={{ border: "1px solid #8C2F26" }}>
+                  <div className="grid grid-cols-3" style={{ background: "#FFFDF7" }}>
+                    <div className="px-2 py-2 text-center" style={{ borderRight: "1px solid #EADFC4" }}>
+                      <div style={{ fontSize: 10, color: "#6B5D4A" }}>আয়</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2A211B" }}>{fmt(todayLoading ? 0 : todaySummary.itemsTotal)}</div>
+                    </div>
+                    <div className="px-2 py-2 text-center" style={{ borderRight: "1px solid #EADFC4" }}>
+                      <div style={{ fontSize: 10, color: "#6B5D4A" }}>খরচ</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#B5473C" }}>{fmt(todayLoading ? 0 : todaySummary.expenseTotal)}</div>
+                    </div>
+                    <div className="px-2 py-2 text-center" style={{ background: "#8C2F26" }}>
+                      <div style={{ fontSize: 10, color: "#F3ECDD", opacity: 0.85 }}>অবশিষ্ট</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#F3ECDD" }}>{fmt(todayLoading ? 0 : todaySummary.remaining)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="px-4 pt-4 pb-2">
               <p style={{ color: "#6B5D4A", fontSize: 13 }}>বছর বেছে নিন</p>
             </div>
@@ -847,6 +995,16 @@ export default function LedgerApp() {
                   }}
                 />
               ))}
+            </div>
+
+            <div className="px-3 pt-4">
+              <button
+                onClick={() => setView("ledger")}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-sm active:opacity-70"
+                style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 13, fontWeight: 600 }}
+              >
+                <Search size={15} /> গ্রাহক লেজার / এন্ট্রি খুঁজুন
+              </button>
             </div>
 
             <div className="px-4 pt-6 pb-8">
@@ -882,23 +1040,36 @@ export default function LedgerApp() {
                     <Th>নাম</Th>
                     <Th right>বাকি</Th>
                   </div>
-                  {allDues.map((e, i) => (
-                    <div
-                      key={i}
-                      className="grid grid-cols-[84px,1fr,70px] items-center"
-                      style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7" }}
-                    >
-                      <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B5D4A" }}>
-                        {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
+                  {allDues.map((e, i) => {
+                    const daysAgo = Math.floor((new Date() - new Date(e.y, e.m - 1, e.d)) / (1000 * 60 * 60 * 24));
+                    const overdue = daysAgo >= 15;
+                    return (
+                      <div
+                        key={i}
+                        className="grid grid-cols-[84px,1fr,70px] items-center"
+                        style={{
+                          borderTop: "1px solid #EADFC4",
+                          background: overdue ? "#FBEAE7" : "#FFFDF7",
+                          borderLeft: overdue ? "3px solid #B5473C" : "3px solid transparent",
+                        }}
+                      >
+                        <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B5D4A" }}>
+                          {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
+                        </div>
+                        <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#2A211B" }}>
+                          {e.name}
+                          {overdue && (
+                            <span style={{ fontSize: 9.5, color: "#B5473C", marginLeft: 5, fontWeight: 600 }}>
+                              ⚠ {toBn(daysAgo)} দিন
+                            </span>
+                          )}
+                        </div>
+                        <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B5473C" }}>
+                          {fmt(e.amount)}
+                        </div>
                       </div>
-                      <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#2A211B" }}>
-                        {e.name}
-                      </div>
-                      <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B5473C" }}>
-                        {fmt(e.amount)}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div className="grid grid-cols-[84px,1fr,70px] items-center" style={{ borderTop: "1px solid #8C2F26", background: "#EFE3C8" }}>
                     <div />
                     <div className="px-2 py-1.5" style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#7A2820" }}>
@@ -909,6 +1080,100 @@ export default function LedgerApp() {
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ---------- LEDGER (গ্রাহক লেজার / এন্ট্রি খোঁজা) ---------- */}
+        {view === "ledger" && (
+          <>
+            <HeaderBar title="গ্রাহক লেজার" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
+            <div className="px-3 pt-4 pb-8">
+              <input
+                value={ledgerQuery}
+                onChange={(e) => setLedgerQuery(e.target.value)}
+                placeholder="নাম দিয়ে খুঁজুন…"
+                className="w-full px-3 py-2 rounded-sm outline-none mb-3"
+                style={{ border: "1px solid #D9CBA8", background: "#FFFDF7", fontSize: 13.5 }}
+              />
+
+              {ledgerLoading ? (
+                <p style={{ fontSize: 12, color: "#8A7A5C" }}>লোড হচ্ছে…</p>
+              ) : ledgerQuery.trim() ? (
+                (() => {
+                  const q = ledgerQuery.trim().toLowerCase();
+                  const matches = ledgerData
+                    .filter((r) => r.name.toLowerCase().includes(q))
+                    .sort((a, b) => b.y - a.y || b.m - a.m || b.d - a.d);
+                  if (matches.length === 0) return <p style={{ fontSize: 12, color: "#8A7A5C" }}>কোনো এন্ট্রি পাওয়া যায়নি।</p>;
+                  return (
+                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #8C2F26" }}>
+                      <div className="grid grid-cols-[70px,1fr,54px,70px]" style={{ background: "#8C2F26" }}>
+                        <Th small>তারিখ</Th>
+                        <Th>নাম</Th>
+                        <Th small>ধরন</Th>
+                        <Th right>টাকা</Th>
+                      </div>
+                      {matches.map((r, i) => (
+                        <div
+                          key={i}
+                          className="grid grid-cols-[70px,1fr,54px,70px] items-center"
+                          style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7" }}
+                        >
+                          <div className="px-2 py-1.5" style={{ fontSize: 11, color: "#6B5D4A" }}>
+                            {toBn(r.d)} {MONTH_NAMES[r.m - 1].slice(0, 3)} {toBn(r.y)}
+                          </div>
+                          <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#2A211B" }}>
+                            {r.name}
+                          </div>
+                          <div className="px-2 py-1.5" style={{ fontSize: 11, color: r.type === "খরচ" ? "#B98B3E" : "#8C2F26" }}>
+                            {r.type}
+                          </div>
+                          <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#2A211B" }}>
+                            {fmt(r.amount)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
+              ) : (
+                (() => {
+                  const grouped = {};
+                  ledgerData
+                    .filter((r) => r.type === "বিক্রি")
+                    .forEach((r) => {
+                      if (!grouped[r.name]) grouped[r.name] = { name: r.name, total: 0, due: 0, discount: 0, count: 0, last: null };
+                      const g = grouped[r.name];
+                      g.total += r.amount;
+                      g.due += r.due;
+                      g.discount += r.discount;
+                      g.count += 1;
+                      const val = r.y * 10000 + r.m * 100 + r.d;
+                      if (!g.last || val > g.last.val) g.last = { val, y: r.y, m: r.m, d: r.d };
+                    });
+                  const list = Object.values(grouped).sort((a, b) => b.total - a.total);
+                  if (list.length === 0) return <p style={{ fontSize: 12, color: "#8A7A5C" }}>এখনও কোনো বিক্রি নেই।</p>;
+                  return (
+                    <div className="flex flex-col gap-2">
+                      {list.map((g, i) => (
+                        <div key={i} className="rounded-sm px-3 py-2.5" style={{ border: "1px solid #D9CBA8", background: "#FFFDF7" }}>
+                          <div className="flex items-center justify-between">
+                            <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#2A211B" }}>{g.name}</span>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: "#8C2F26" }}>{fmt(g.total)}</span>
+                          </div>
+                          <div className="flex items-center justify-between mt-1" style={{ fontSize: 11, color: "#8A7A5C" }}>
+                            <span>
+                              {toBn(g.count)} টা এন্ট্রি · সর্বশেষ {toBn(g.last.d)} {MONTH_NAMES[g.last.m - 1].slice(0, 3)} {toBn(g.last.y)}
+                            </span>
+                            {g.due > 0 && <span style={{ color: "#B5473C", fontWeight: 600 }}>বাকি {fmt(g.due)}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
               )}
             </div>
           </>
@@ -963,6 +1228,17 @@ export default function LedgerApp() {
               editMode={editMode}
               onToggleMode={toggleEditMode}
             />
+
+            <div className="px-3 pt-3">
+              <button
+                onClick={() => printMonthReport(year, month, monthEntries)}
+                disabled={monthLoading}
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-sm active:opacity-70"
+                style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 12.5, fontWeight: 600 }}
+              >
+                <Printer size={14} /> PDF রিপোর্ট
+              </button>
+            </div>
 
             {!editMode && (
               <div
