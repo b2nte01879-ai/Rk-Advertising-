@@ -497,6 +497,8 @@ export default function LedgerApp() {
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerData, setLedgerData] = useState([]);
   const [ledgerQuery, setLedgerQuery] = useState("");
+  const [paymentInputs, setPaymentInputs] = useState({});
+  const [payingKey, setPayingKey] = useState(null);
   const [backingUp, setBackingUp] = useState(false);
 
   const [yearStats, setYearStats] = useState({ income: 0, expense: 0 });
@@ -585,10 +587,75 @@ export default function LedgerApp() {
     const remaining = totalMoney - expenseTotal;
     const dueRows = items
       .filter((it) => !isNaN(num(it.due)) && num(it.due) > 0)
-      .map((it) => ({ name: it.name || "(নামহীন)", amount: num(it.due) }));
+      .map((it) => ({ id: it.id, name: it.name || "(নামহীন)", amount: num(it.due) }));
     await saveDuesForDate(y, m, d, dueRows);
     await saveYearStatsForDate(y, m, d, itemsTotal, expenseTotal, remaining);
   }
+
+  async function settlePayment(dueEntry, py, pm, pd, amount) {
+    // ১. আসল বিক্রির 'বাকি' থেকে বাদ দেওয়া
+    const origRaw = await loadDay(dueEntry.y, dueEntry.m, dueEntry.d);
+    const items = origRaw.items.map((it) => {
+      if (it.id === dueEntry.id) {
+        const newDue = Math.max(0, (num(it.due) || 0) - amount);
+        return { ...it, due: newDue === 0 ? "" : String(newDue) };
+      }
+      return it;
+    });
+    await recomputeAndSaveDay(dueEntry.y, dueEntry.m, dueEntry.d, { ...origRaw, items });
+
+    // ২. পরিশোধের টাকা যেই তারিখে জমা হলো, সেই তারিখে আয় হিসেবে যোগ করা
+    const payRaw = await loadDay(py, pm, pd);
+    const newItem = {
+      id: emptyRowId(),
+      name: `${dueEntry.name} (পরিশোধ)`,
+      height: "",
+      weight: "",
+      qty: "1",
+      price: String(amount),
+      due: "",
+      discount: "",
+    };
+    const items2 = [...payRaw.items.filter(isMeaningfulItem), newItem];
+    await recomputeAndSaveDay(py, pm, pd, { ...payRaw, items: items2 });
+  }
+
+  const todayInputValue = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  };
+
+  const handleSettlePayment = async (dueEntry, key) => {
+    const input = paymentInputs[key] || {};
+    const amount = num(input.amount);
+    if (isNaN(amount) || amount <= 0) return;
+    const dateStr = input.date || todayInputValue();
+    const [py, pm, pd] = dateStr.split("-").map(Number);
+    setPayingKey(key);
+    try {
+      await settlePayment(dueEntry, py, pm, pd, amount);
+      setPaymentInputs((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setAllDuesLoading(true);
+      const results = await Promise.all(YEARS.map((y) => loadDues(y)));
+      const flat = [];
+      results.forEach((duesForYear, idx) => {
+        const y = YEARS[idx];
+        Object.entries(duesForYear).forEach(([k, entries]) => {
+          const [m, d] = k.split("-").map(Number);
+          entries.forEach((e) => flat.push({ y, m, d, ...e }));
+        });
+      });
+      flat.sort((a, b) => a.y - b.y || a.m - b.m || a.d - b.d);
+      setAllDues(flat);
+      setAllDuesLoading(false);
+    } finally {
+      setPayingKey(null);
+    }
+  };
 
   async function loadMonthEntries(y, m) {
     const n = daysInMonth(y, m);
@@ -1056,30 +1123,67 @@ export default function LedgerApp() {
                   {allDues.map((e, i) => {
                     const daysAgo = Math.floor((new Date() - new Date(e.y, e.m - 1, e.d)) / (1000 * 60 * 60 * 24));
                     const overdue = daysAgo >= 15;
+                    const key = `${e.y}-${e.m}-${e.d}-${e.id}`;
+                    const input = paymentInputs[key] || {};
                     return (
-                      <div
-                        key={i}
-                        className="grid grid-cols-[84px,1fr,70px] items-center"
-                        style={{
-                          borderTop: "1px solid #EADFC4",
-                          background: overdue ? "#FBEAE7" : "#FFFDF7",
-                          borderLeft: overdue ? "3px solid #B5473C" : "3px solid transparent",
-                        }}
-                      >
-                        <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B5D4A" }}>
-                          {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
+                      <div key={i} style={{ borderTop: "1px solid #EADFC4" }}>
+                        <div
+                          className="grid grid-cols-[84px,1fr,70px] items-center"
+                          style={{
+                            background: overdue ? "#FBEAE7" : "#FFFDF7",
+                            borderLeft: overdue ? "3px solid #B5473C" : "3px solid transparent",
+                          }}
+                        >
+                          <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B5D4A" }}>
+                            {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
+                          </div>
+                          <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#2A211B" }}>
+                            {e.name}
+                            {overdue && (
+                              <span style={{ fontSize: 9.5, color: "#B5473C", marginLeft: 5, fontWeight: 600 }}>
+                                ⚠ {toBn(daysAgo)} দিন
+                              </span>
+                            )}
+                          </div>
+                          <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B5473C" }}>
+                            {fmt(e.amount)}
+                          </div>
                         </div>
-                        <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#2A211B" }}>
-                          {e.name}
-                          {overdue && (
-                            <span style={{ fontSize: 9.5, color: "#B5473C", marginLeft: 5, fontWeight: 600 }}>
-                              ⚠ {toBn(daysAgo)} দিন
-                            </span>
-                          )}
-                        </div>
-                        <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B5473C" }}>
-                          {fmt(e.amount)}
-                        </div>
+                        {editMode && (
+                          <div
+                            className="flex items-center gap-1.5 px-2 py-1.5"
+                            style={{ background: "#F3ECDD", borderTop: "1px dashed #D9CBA8" }}
+                          >
+                            <span style={{ fontSize: 10.5, color: "#8C2F26", fontWeight: 600, whiteSpace: "nowrap" }}>পরিশোধ:</span>
+                            <input
+                              value={input.amount || ""}
+                              onChange={(ev) =>
+                                setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], amount: ev.target.value } }))
+                              }
+                              inputMode="decimal"
+                              placeholder="টাকা"
+                              className="min-w-0 px-1.5 py-1 rounded-sm outline-none"
+                              style={{ width: 64, fontSize: 11, border: "1px solid #D9CBA8", background: "#FFFDF7" }}
+                            />
+                            <input
+                              type="date"
+                              value={input.date || todayInputValue()}
+                              onChange={(ev) =>
+                                setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], date: ev.target.value } }))
+                              }
+                              className="min-w-0 px-1.5 py-1 rounded-sm outline-none"
+                              style={{ fontSize: 10.5, border: "1px solid #D9CBA8", background: "#FFFDF7" }}
+                            />
+                            <button
+                              onClick={() => handleSettlePayment(e, key)}
+                              disabled={payingKey === key || !num(input.amount) || num(input.amount) <= 0}
+                              className="px-2.5 py-1 rounded-sm active:opacity-70 ml-auto"
+                              style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}
+                            >
+                              {payingKey === key ? "…" : "জমা করুন"}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
