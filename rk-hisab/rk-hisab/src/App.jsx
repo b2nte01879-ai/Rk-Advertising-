@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, ChevronLeft, BookOpen, Pencil, Eye, Download, Search, Printer } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer } from "lucide-react";
 import { storage } from "./firebase";
 
 // ---------- constants ----------
@@ -979,22 +979,35 @@ export default function LedgerApp() {
               </div>
             )}
 
-            <div className="px-4 pt-4 pb-2">
-              <p style={{ color: "#6B5D4A", fontSize: 13 }}>বছর বেছে নিন</p>
-            </div>
-            <div className="flex flex-col">
-              {YEARS.map((y) => (
-                <Tab
-                  key={y}
-                  index={toBn(y)}
-                  label={`সন ${toBn(y)}`}
-                  sub="১২ মাস"
-                  onClick={() => {
+            <div className="px-4 pt-4 pb-6">
+              <p style={{ color: "#6B5D4A", fontSize: 13, marginBottom: 8 }}>বছর বেছে নিন</p>
+              <select
+                value=""
+                onChange={(e) => {
+                  const y = Number(e.target.value);
+                  if (y) {
                     setYear(y);
                     setView("months");
-                  }}
-                />
-              ))}
+                  }
+                }}
+                className="w-full px-4 py-4 rounded-sm outline-none"
+                style={{
+                  border: "1px solid #8C2F26",
+                  background: "#FFFDF7",
+                  color: "#8C2F26",
+                  fontFamily: "'Noto Serif Bengali', serif",
+                  fontSize: 17,
+                }}
+              >
+                <option value="" disabled>
+                  একটা সন সিলেক্ট করুন
+                </option>
+                {YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    সন {toBn(y)}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="px-3 pt-4">
