@@ -8,6 +8,8 @@ const MONTH_NAMES = [
   "জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন",
   "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর",
 ];
+const WEEKDAY_NAMES = ["রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার"];
+const getWeekday = (y, m, d) => WEEKDAY_NAMES[new Date(y, m - 1, d).getDay()];
 const BN_DIGITS = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
 
 const toBn = (n) =>
@@ -668,7 +670,87 @@ export default function LedgerApp() {
     return obj;
   }
 
+  const printDayMemo = (y, m, d, dayData) => {
+    const win = window.open("", "_blank");
+    if (!win) return;
+
+    const saleRows = dayData.items
+      .map(
+        (it) => `<tr>
+          <td>${it.name || ""}</td>
+          <td style="text-align:right">${it.height || "—"}</td>
+          <td style="text-align:right">${it.weight || "—"}</td>
+          <td style="text-align:right">${it.qty || "১"}</td>
+          <td style="text-align:right">${fmt(num(it.price) || 0)}</td>
+          <td style="text-align:right">${fmt(netTotal(it))}</td>
+          <td style="text-align:right">${fmt(num(it.due) || 0)}</td>
+          <td style="text-align:right">${fmt(num(it.discount) || 0)}</td>
+        </tr>`
+      )
+      .join("");
+
+    const expenseRows = dayData.expenses
+      .map((e) => `<tr><td>${e.name || ""}</td><td style="text-align:right">${fmt(num(e.amount) || 0)}</td></tr>`)
+      .join("");
+
+    win.document.write(`
+      <html><head><title>মেমো — ${toBn(d)} ${MONTH_NAMES[m - 1]} ${toBn(y)}</title>
+      <meta charset="utf-8" />
+      <style>
+        body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#2A211B;}
+        .letterhead{text-align:center;border-bottom:2px solid #8C2F26;padding-bottom:10px;margin-bottom:14px;}
+        .letterhead h1{color:#8C2F26;font-size:22px;margin:0;}
+        .letterhead p{color:#6B5D4A;font-size:12px;margin:4px 0 0;}
+        .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:14px;}
+        h2{font-size:14px;color:#8C2F26;margin:16px 0 6px;}
+        table{width:100%;border-collapse:collapse;}
+        th,td{border:1px solid #D9CBA8;padding:5px 8px;font-size:12.5px;}
+        th{background:#8C2F26;color:#fff;text-align:left;}
+        .exp-th{background:#B98B3E;}
+        .summary{width:320px;margin-left:auto;margin-top:16px;}
+        .summary td{border:none;padding:3px 4px;font-size:13px;}
+        .summary tr.total td{border-top:2px solid #8C2F26;font-weight:bold;font-size:15px;color:#8C2F26;}
+        @media print{ body{padding:10mm;} }
+      </style>
+      </head><body>
+        <div class="letterhead">
+          <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
+          <p>আবুল বিড়ি ফ্যাক্টরির বিপরীতে, ডি.টি রোড, পাহাড়তলী, চট্টগ্রাম</p>
+          <p>ফোন: ০১৭৯৬২১৬৮৩৩</p>
+        </div>
+        <div class="meta">
+          <span>তারিখ: ${toBn(d)} ${MONTH_NAMES[m - 1]}, ${toBn(y)} (${getWeekday(y, m, d)})</span>
+        </div>
+
+        <h2>বিক্রি</h2>
+        <table>
+          <thead><tr><th>নাম</th><th>হাইট</th><th>ওয়েট</th><th>পরিমান</th><th>দাম</th><th>মোট</th><th>বাকি</th><th>ছাড়</th></tr></thead>
+          <tbody>${saleRows || '<tr><td colspan="8" style="text-align:center;color:#8A7A5C">কোনো বিক্রি নেই</td></tr>'}</tbody>
+        </table>
+
+        <h2>খরচ</h2>
+        <table>
+          <thead><tr><th class="exp-th">বিবরণ</th><th class="exp-th" style="text-align:right">টাকা</th></tr></thead>
+          <tbody>${expenseRows || '<tr><td colspan="2" style="text-align:center;color:#8A7A5C">কোনো খরচ নেই</td></tr>'}</tbody>
+        </table>
+
+        <table class="summary">
+          <tr><td>ইজা টাকা</td><td style="text-align:right">${fmt(dayData.opening)}</td></tr>
+          <tr><td>বিক্রি মোট</td><td style="text-align:right">${fmt(dayData.itemsTotal)}</td></tr>
+          <tr><td>মোট টাকা</td><td style="text-align:right">${fmt(dayData.totalMoney)}</td></tr>
+          <tr><td>মোট খরচ (-)</td><td style="text-align:right">${fmt(dayData.expenseTotal)}</td></tr>
+          <tr class="total"><td>অবশিষ্ট</td><td style="text-align:right">${fmt(dayData.remaining)}</td></tr>
+        </table>
+      </body></html>
+    `);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
+  };
+
   const printMonthReport = (y, m, entries) => {
+    const win = window.open("", "_blank");
+    if (!win) return;
     const days = Object.keys(entries)
       .map(Number)
       .sort((a, b) => a - b);
@@ -682,8 +764,6 @@ export default function LedgerApp() {
       .join("");
     const totalIncome = days.reduce((s, d) => s + entries[d].itemsTotal, 0);
     const totalExpense = days.reduce((s, d) => s + entries[d].expenseTotal, 0);
-    const win = window.open("", "_blank");
-    if (!win) return;
     win.document.write(`
       <html><head><title>${MONTH_NAMES[m - 1]} ${y} - R.K Advertising</title>
       <meta charset="utf-8" />
@@ -1598,12 +1678,23 @@ export default function LedgerApp() {
                     const hasEntries = dayData && (dayData.expenses.length > 0 || dayData.items.length > 0);
                     return (
                       <div key={d} className="rounded-sm mb-3" style={{ border: "1px solid #D9CBA8" }}>
-                        <p
-                          className="px-3 py-2"
-                          style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#8C2F26", background: "#F3ECDD", margin: 0 }}
+                        <div
+                          className="px-3 py-2 flex items-center justify-between"
+                          style={{ background: "#F3ECDD" }}
                         >
-                          {toBn(d)} {MONTH_NAMES[month - 1]}, {toBn(year)}
-                        </p>
+                          <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#8C2F26", margin: 0 }}>
+                            {toBn(d)} {MONTH_NAMES[month - 1]}, {toBn(year)} <span style={{ fontSize: 12, color: "#8A7A5C" }}>({getWeekday(year, month, d)})</span>
+                          </p>
+                          {hasEntries && (
+                            <button
+                              onClick={() => printDayMemo(year, month, d, dayData)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-sm active:opacity-70"
+                              style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 10.5 }}
+                            >
+                              <Printer size={12} /> মেমো
+                            </button>
+                          )}
+                        </div>
                         {!hasEntries ? (
                           <p className="px-3 py-2" style={{ fontSize: 11, color: "#8A7A5C", margin: 0 }}>
                             কোনো এন্ট্রি নেই
@@ -1979,4 +2070,3 @@ export default function LedgerApp() {
       </div>
     </div>
   );
-}
