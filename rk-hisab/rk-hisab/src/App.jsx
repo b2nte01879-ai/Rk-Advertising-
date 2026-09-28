@@ -10,6 +10,10 @@ const MONTH_NAMES = [
 ];
 const WEEKDAY_NAMES = ["রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার"];
 const getWeekday = (y, m, d) => WEEKDAY_NAMES[new Date(y, m - 1, d).getDay()];
+
+// দ্রুত বেছে নেওয়ার জন্য ডিফল্ট নামের তালিকা (চাইলে নিজে আরও যোগ করা যায়)
+const DEFAULT_SALE_NAMES = ["ব্যানার", "ফেস্টুন", "ফ্লেক্স", "স্টিকার", "ভিজিটিং কার্ড"];
+const DEFAULT_EXPENSE_NAMES = ["নাস্তা", "মিটার রিচার্জ", "মাল ক্রয়", "ব্যানার প্রিন্ট"];
 const BN_DIGITS = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
 
 const toBn = (n) =>
@@ -374,6 +378,44 @@ const SummaryRow = ({ label, value, negative, strong, muted, editableHint }) => 
   </div>
 );
 
+const PresetChips = ({ names, customNames, onPick, onAdd, onRemove }) => (
+  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+    {names.map((n) => {
+      const isCustom = customNames.includes(n);
+      return (
+        <span
+          key={n}
+          className="inline-flex items-center rounded-full"
+          style={{ border: "1px solid #D9CBA8", background: "#FFFDF7", color: "#8C2F26", fontSize: 12.5 }}
+        >
+          <button type="button" onClick={() => onPick(n)} className="px-2.5 py-1 active:opacity-60">
+            {n}
+          </button>
+          {isCustom && (
+            <button
+              type="button"
+              onClick={() => onRemove(n)}
+              className="pr-2 active:opacity-60"
+              style={{ color: "#B5473C", fontSize: 13, lineHeight: 1 }}
+              aria-label={`${n} মুছুন`}
+            >
+              ×
+            </button>
+          )}
+        </span>
+      );
+    })}
+    <button
+      type="button"
+      onClick={onAdd}
+      className="rounded-full px-2.5 py-1 active:opacity-60"
+      style={{ border: "1px dashed #8C2F26", color: "#8C2F26", fontSize: 12.5 }}
+    >
+      + নতুন নাম
+    </button>
+  </div>
+);
+
 // ---------- main app ----------
 export default function LedgerApp() {
   useLedgerFonts();
@@ -528,6 +570,71 @@ export default function LedgerApp() {
   const [draftYear, setDraftYear] = useState(_initYear);
   const [expenseDrafts, setExpenseDrafts] = useState([emptyExpenseDraft()]);
   const [saleDrafts, setSaleDrafts] = useState([emptySaleDraft()]);
+
+  // কাস্টম নামের তালিকা (Firestore-এ সেভ থাকে, সবাই একই তালিকা দেখে)
+  const [customSaleNames, setCustomSaleNames] = useState([]);
+  const [customExpenseNames, setCustomExpenseNames] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const a = await storage.get("presets:sale");
+        if (a && a.value) setCustomSaleNames(JSON.parse(a.value));
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        const b = await storage.get("presets:expense");
+        if (b && b.value) setCustomExpenseNames(JSON.parse(b.value));
+      } catch (e) {
+        /* ignore */
+      }
+    })();
+  }, []);
+
+  const allSaleNames = [...DEFAULT_SALE_NAMES, ...customSaleNames];
+  const allExpenseNames = [...DEFAULT_EXPENSE_NAMES, ...customExpenseNames];
+
+  const addPresetName = async (kind) => {
+    const raw = window.prompt(kind === "sale" ? "বিক্রির নতুন নাম লিখুন (যেমন: পোস্টার):" : "খরচের নতুন নাম লিখুন (যেমন: গাড়ি ভাড়া):");
+    const name = (raw || "").trim();
+    if (!name) return;
+    const existing = kind === "sale" ? allSaleNames : allExpenseNames;
+    if (existing.includes(name)) return;
+    const next = [...(kind === "sale" ? customSaleNames : customExpenseNames), name];
+    if (kind === "sale") setCustomSaleNames(next);
+    else setCustomExpenseNames(next);
+    try {
+      await storage.set(kind === "sale" ? "presets:sale" : "presets:expense", JSON.stringify(next));
+    } catch (e) {
+      console.error("preset save failed", e);
+    }
+  };
+
+  const removePresetName = async (kind, name) => {
+    const next = (kind === "sale" ? customSaleNames : customExpenseNames).filter((n) => n !== name);
+    if (kind === "sale") setCustomSaleNames(next);
+    else setCustomExpenseNames(next);
+    try {
+      await storage.set(kind === "sale" ? "presets:sale" : "presets:expense", JSON.stringify(next));
+    } catch (e) {
+      console.error("preset save failed", e);
+    }
+  };
+
+  // চিপে ট্যাপ করলে প্রথম খালি-নামের সারিতে বসে, না থাকলে নতুন সারি যোগ হয়
+  const applySalePreset = (name) =>
+    setSaleDrafts((rows) => {
+      const i = rows.findIndex((r) => !r.name);
+      if (i >= 0) return rows.map((r, j) => (j === i ? { ...r, name } : r));
+      return [...rows, { ...emptySaleDraft(), name }];
+    });
+  const applyExpensePreset = (name) =>
+    setExpenseDrafts((rows) => {
+      const i = rows.findIndex((r) => !r.name);
+      if (i >= 0) return rows.map((r, j) => (j === i ? { ...r, name } : r));
+      return [...rows, { ...emptyExpenseDraft(), name }];
+    });
   const [editingExpenseOrigin, setEditingExpenseOrigin] = useState(null);
   const [editingSaleOrigin, setEditingSaleOrigin] = useState(null);
 
@@ -1063,6 +1170,16 @@ export default function LedgerApp() {
           .rk-zoom .rk-brand-title { font-size: 23px !important; }
         }
       `}</style>
+      <datalist id="sale-name-options">
+        {allSaleNames.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      <datalist id="expense-name-options">
+        {allExpenseNames.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
       <div
         className="rk-zoom min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto lg:max-w-6xl lg:h-screen lg:my-0 lg:rounded-none lg:shadow-none"
         style={{ background: "#F3ECDD", fontFamily: "'Noto Sans Bengali', sans-serif" }}
@@ -1493,11 +1610,18 @@ export default function LedgerApp() {
                   {/* --- বিক্রি ড্রাফট (৭০%, একাধিক সারি) --- */}
                   <div className="px-3 lg:w-[70%]">
                     <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26", margin: "4px 0" }}>বিক্রি</p>
+                    <PresetChips
+                      names={allSaleNames}
+                      customNames={customSaleNames}
+                      onPick={applySalePreset}
+                      onAdd={() => addPresetName("sale")}
+                      onRemove={(n) => removePresetName("sale", n)}
+                    />
                     <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
                       <div className="overflow-x-auto">
                         <div
                           className="grid items-center"
-                          style={{ gridTemplateColumns: "100px 48px 48px 56px 48px 56px 48px 48px 24px", background: "#B98B3E", minWidth: 460 }}
+                          style={{ gridTemplateColumns: "120px 48px 48px 56px 48px 56px 48px 48px 24px", background: "#B98B3E", minWidth: 480 }}
                         >
                           <Th>নাম</Th>
                           <Th right>হাইট</Th>
@@ -1514,15 +1638,16 @@ export default function LedgerApp() {
                             key={idx}
                             className="grid items-center"
                             style={{
-                              gridTemplateColumns: "100px 48px 48px 56px 48px 56px 48px 48px 24px",
+                              gridTemplateColumns: "120px 48px 48px 56px 48px 56px 48px 48px 24px",
                               background: "#FFFDF7",
-                              minWidth: 460,
+                              minWidth: 480,
                               borderTop: idx > 0 ? "1px solid #EADFC4" : "none",
                             }}
                           >
                             <input
                               value={row.name}
                               onChange={(e) => updateSaleDraft(idx, "name", e.target.value)}
+                              list="sale-name-options"
                               placeholder="নাম"
                               className="min-w-0 px-1.5 py-2 bg-transparent outline-none"
                               style={{ fontSize: 14, color: "#2A211B" }}
@@ -1604,6 +1729,13 @@ export default function LedgerApp() {
                   {/* --- খরচ ড্রাফট (৩০%, একাধিক সারি) --- */}
                   <div className="px-3 mt-3 lg:mt-0 lg:w-[30%]">
                     <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26", margin: "4px 0" }}>খরচ</p>
+                    <PresetChips
+                      names={allExpenseNames}
+                      customNames={customExpenseNames}
+                      onPick={applyExpensePreset}
+                      onAdd={() => addPresetName("expense")}
+                      onRemove={(n) => removePresetName("expense", n)}
+                    />
                     <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
                       <div className="grid" style={{ gridTemplateColumns: "1fr 70px 24px", background: "#8C2F26" }}>
                         <Th>বিবরণ</Th>
@@ -1619,6 +1751,7 @@ export default function LedgerApp() {
                           <input
                             value={row.name}
                             onChange={(e) => updateExpenseDraft(idx, "name", e.target.value)}
+                            list="expense-name-options"
                             placeholder="যেমন: নাস্তা"
                             className="min-w-0 px-2 py-2 bg-transparent outline-none"
                             style={{ fontSize: 15, color: "#2A211B" }}
@@ -2070,3 +2203,4 @@ export default function LedgerApp() {
       </div>
     </div>
   );
+}
