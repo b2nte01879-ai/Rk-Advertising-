@@ -44,6 +44,8 @@ const newItemRow = () => ({
 });
 
 const num = (v) => (v === "" || v === null || v === undefined ? NaN : parseFloat(v));
+// বিক্রির সারিতে 'বাকি' যেমন লেখা তেমনই থাকে; শোধ হলে 'duePaid' বাড়ে। বাকির লিস্টে দেখায় বাকি − শোধ।
+const dueRemaining = (it) => Math.max(0, (isNaN(num(it.due)) ? 0 : num(it.due)) - (isNaN(num(it.duePaid)) ? 0 : num(it.duePaid)));
 
 function grossTotal(item) {
   const h = isNaN(num(item.height)) ? 1 : num(item.height);
@@ -274,7 +276,7 @@ async function buildAllTransactions() {
           type: "বিক্রি",
           name: it.name || "(নামহীন)",
           amount: netTotal(it),
-          due: num(it.due) || 0,
+          due: dueRemaining(it),
           discount: num(it.discount) || 0,
         });
       });
@@ -954,8 +956,8 @@ export default function LedgerApp() {
         : computedTotalMoney;
     const remaining = totalMoney - expenseTotal;
     const dueRows = items
-      .filter((it) => !isNaN(num(it.due)) && num(it.due) > 0)
-      .map((it) => ({ id: it.id, name: it.name || "(নামহীন)", amount: num(it.due) }));
+      .filter((it) => dueRemaining(it) > 0)
+      .map((it) => ({ id: it.id, name: it.name || "(নামহীন)", amount: dueRemaining(it) }));
     await saveDuesForDate(y, m, d, dueRows);
     await saveYearStatsForDate(y, m, d, itemsTotal, expenseTotal, remaining);
   }
@@ -963,10 +965,11 @@ export default function LedgerApp() {
   async function settlePayment(dueEntry, py, pm, pd, amount) {
     // ১. আসল বিক্রির 'বাকি' থেকে বাদ দেওয়া
     const origRaw = await loadDay(dueEntry.y, dueEntry.m, dueEntry.d);
+    // 'বাকি' সংখ্যাটা বদলাই না, তাই আসল দিনের আয় একই থাকে। শুধু 'শোধ হয়েছে' জমা রাখি।
     const items = origRaw.items.map((it) => {
       if (it.id === dueEntry.id) {
-        const newDue = Math.max(0, (num(it.due) || 0) - amount);
-        return { ...it, due: newDue === 0 ? "" : String(newDue) };
+        const paidSoFar = Math.min(num(it.due) || 0, (num(it.duePaid) || 0) + amount);
+        return { ...it, duePaid: String(paidSoFar) };
       }
       return it;
     });
@@ -1373,6 +1376,7 @@ export default function LedgerApp() {
         qty: row.qty,
         price: row.price,
         due: row.due,
+        duePaid: row.duePaid ?? "",
         discount: row.discount,
       },
     ]);
@@ -2798,7 +2802,12 @@ export default function LedgerApp() {
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.qty || "১"}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.price || 0}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>{fmt(netTotal(row))}</td>
-                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#B5473C" }}>{row.due || 0}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#B5473C" }}>
+                                          {row.due || 0}
+                                          {num(row.duePaid) > 0 && (
+                                            <div style={{ fontSize: 9.5, color: "#5B7F3E" }}>শোধ {fmt(num(row.duePaid))}</div>
+                                          )}
+                                        </td>
                                         <td style={{ padding: "5px 6px", textAlign: "right", color: "#8C6A2F" }}>{row.discount || 0}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>
                                           <button
