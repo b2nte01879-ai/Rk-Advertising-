@@ -3,7 +3,8 @@ import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download
 import { storage } from "./firebase";
 
 // ---------- constants ----------
-const YEARS = [2026, 2027, 2028, 2029, 2030];
+const _NOW_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: 10 }, (_, i) => _NOW_YEAR - 2 + i); // ২ বছর আগে থেকে +৭ বছর
 const MONTH_NAMES = [
   "জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন",
   "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর",
@@ -80,39 +81,124 @@ function useLedgerFonts() {
   }, []);
 }
 
+// ---------- নিরাপদ স্টোরেজ: লোকাল মিরর + অফলাইন পেন্ডিং কিউ ----------
+// ১) সফল রিড/রাইট localStorage-এ মিরর হয়  ২) রিমোট সেভ ফেল হলে লেখা কিউতে জমা থাকে
+// ৩) নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হয় — লেখা কোনোদিন হারায় না
+function lsGet(key) {
+  try {
+    const v = localStorage.getItem("mirror:" + key);
+    return v ? JSON.parse(v) : null;
+  } catch (e) {
+    return null;
+  }
+}
+function lsSet(key, value) {
+  try {
+    localStorage.setItem("mirror:" + key, JSON.stringify(value));
+  } catch (e) {
+    /* ignore */
+  }
+}
+function queueWrite(key, value) {
+  try {
+    const q = JSON.parse(localStorage.getItem("pendingWrites") || "[]");
+    q.push({ key, value });
+    localStorage.setItem("pendingWrites", JSON.stringify(q));
+  } catch (e) {
+    /* ignore */
+  }
+}
+function pendingCount() {
+  try {
+    return JSON.parse(localStorage.getItem("pendingWrites") || "[]").length;
+  } catch (e) {
+    return 0;
+  }
+}
+async function flushPendingWrites() {
+  let q = [];
+  try {
+    q = JSON.parse(localStorage.getItem("pendingWrites") || "[]");
+  } catch (e) {
+    return 0;
+  }
+  let sent = 0;
+  for (let i = 0; i < q.length; i++) {
+    try {
+      await storage.set(q[i].key, q[i].value);
+      sent++;
+    } catch (e) {
+      // এখনো নেট নেই — বাকিটা পরে
+      try {
+        localStorage.setItem("pendingWrites", JSON.stringify(q.slice(i)));
+      } catch (e2) {}
+      return sent;
+    }
+  }
+  try {
+    localStorage.setItem("pendingWrites", "[]");
+  } catch (e) {}
+  return sent;
+}
+// রিড: রিমোট থেকে পেলে মিরর আপডেট; না পারলে লোকাল মিরর থেকে (স্টেইল ডেটা, কিন্তু হারায় না)
+async function kget(key) {
+  try {
+    const res = await storage.get(key);
+    if (res && res.value) {
+      lsSet(key, res.value);
+      return res.value;
+    }
+    return lsGet(key);
+  } catch (e) {
+    return lsGet(key);
+  }
+}
+// রাইট: আগে লোকাল মিরর, তারপর রিমোট; রিমোট ফেল হলে কিউতে (false রিটার্ন)
+async function kset(key, value) {
+  lsSet(key, value);
+  try {
+    await storage.set(key, value);
+    // একই key-এর পুরনো পেন্ডিং লেখা আর পাঠাবো না (ভুলক্রমে পুরনো ডেটা ওভাররাইট ঠেকাতে)
+    try {
+      const rest = JSON.parse(localStorage.getItem("pendingWrites") || "[]").filter((w) => w.key !== key);
+      localStorage.setItem("pendingWrites", JSON.stringify(rest));
+    } catch (e) {}
+    return true;
+  } catch (e) {
+    queueWrite(key, value);
+    return false;
+  }
+}
+
 // ---------- storage helpers (Firestore-backed) ----------
 async function loadDay(y, m, d) {
-  try {
-    const res = await storage.get(dayKey(y, m, d));
-    if (res && res.value) {
-      const parsed = JSON.parse(res.value);
+  const raw = await kget(dayKey(y, m, d));
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
       return {
         expenses: parsed.expenses && parsed.expenses.length ? parsed.expenses : [newExpenseRow()],
         items: parsed.items && parsed.items.length ? parsed.items : [newItemRow()],
         openingOverride: parsed.openingOverride ?? null,
         totalOverride: parsed.totalOverride ?? null,
       };
+    } catch (e) {
+      /* parse error */
     }
-  } catch (e) {
-    /* not found */
   }
   return { expenses: [newExpenseRow()], items: [newItemRow()], openingOverride: null, totalOverride: null };
 }
 
 async function saveDay(y, m, d, data) {
-  try {
-    await storage.set(dayKey(y, m, d), JSON.stringify(data));
-  } catch (e) {
-    console.error("save failed", e);
-  }
+  await kset(dayKey(y, m, d), JSON.stringify(data));
 }
 
 async function loadDues(year) {
-  try {
-    const res = await storage.get(duesKey(year));
-    if (res && res.value) return JSON.parse(res.value);
-  } catch (e) {
-    /* not found */
+  const raw = await kget(duesKey(year));
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {}
   }
   return {};
 }
@@ -122,19 +208,15 @@ async function saveDuesForDate(year, month, day, entries) {
   const k = `${month}-${day}`;
   if (entries.length) all[k] = entries;
   else delete all[k];
-  try {
-    await storage.set(duesKey(year), JSON.stringify(all));
-  } catch (e) {
-    console.error("dues save failed", e);
-  }
+  await kset(duesKey(year), JSON.stringify(all));
 }
 
 async function loadYearStats(year) {
-  try {
-    const res = await storage.get(yearStatsKey(year));
-    if (res && res.value) return JSON.parse(res.value);
-  } catch (e) {
-    /* not found */
+  const raw = await kget(yearStatsKey(year));
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {}
   }
   return {};
 }
@@ -143,11 +225,7 @@ async function saveYearStatsForDate(year, month, day, income, expense, balance) 
   const all = await loadYearStats(year);
   const k = `${month}-${day}`;
   all[k] = { income, expense, balance };
-  try {
-    await storage.set(yearStatsKey(year), JSON.stringify(all));
-  } catch (e) {
-    console.error("year stats save failed", e);
-  }
+  await kset(yearStatsKey(year), JSON.stringify(all));
 }
 
 async function findOpeningBalance(y, m, d) {
@@ -345,23 +423,17 @@ function memoCalc(memo) {
 }
 
 async function loadMemosYear(y) {
-  try {
-    const res = await storage.get(memosKey(y));
-    if (res && res.value) return JSON.parse(res.value);
-  } catch (e) {
-    /* not found */
+  const raw = await kget(memosKey(y));
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {}
   }
   return [];
 }
 
 async function saveMemosYear(y, list) {
-  try {
-    await storage.set(memosKey(y), JSON.stringify(list));
-    return true;
-  } catch (e) {
-    console.error("memo save failed", e);
-    return false;
-  }
+  return await kset(memosKey(y), JSON.stringify(list));
 }
 
 async function loadAllMemos() {
@@ -370,23 +442,17 @@ async function loadAllMemos() {
 }
 
 async function loadManualDues() {
-  try {
-    const res = await storage.get(MANUAL_DUES_KEY);
-    if (res && res.value) return JSON.parse(res.value);
-  } catch (e) {
-    /* not found */
+  const raw = await kget(MANUAL_DUES_KEY);
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {}
   }
   return [];
 }
 
 async function saveManualDues(list) {
-  try {
-    await storage.set(MANUAL_DUES_KEY, JSON.stringify(list));
-    return true;
-  } catch (e) {
-    console.error("manual dues save failed", e);
-    return false;
-  }
+  return await kset(MANUAL_DUES_KEY, JSON.stringify(list));
 }
 
 // বাকির লিস্ট = দৈনিক হিসাবের বাকি + সরাসরি যোগ করা বাকি (মেমো থেকে আসা সহ)
@@ -791,6 +857,17 @@ export default function LedgerApp() {
     }
   }, []);
 
+  // অফলাইনে জমা থাকা সেভগুলো নেট চলে এলে স্বয়ংক্রিয়ভাবে পাঠানো
+  useEffect(() => {
+    const flush = async () => {
+      const n = await flushPendingWrites();
+      if (n > 0) window.alert(`✅ ${toBn(n)} টা পেন্ডিং সেভ সার্ভারে পাঠানো হয়েছে।`);
+    };
+    window.addEventListener("online", flush);
+    flush();
+    return () => window.removeEventListener("online", flush);
+  }, []);
+
   const ADMIN_PIN_KEY = "adminPin";
 
   const toggleEditMode = async () => {
@@ -894,17 +971,17 @@ export default function LedgerApp() {
 
   useEffect(() => {
     (async () => {
-      try {
-        const a = await storage.get("presets:sale");
-        if (a && a.value) setCustomSaleNames(JSON.parse(a.value));
-      } catch (e) {
-        /* ignore */
+      const a = await kget("presets:sale");
+      if (a) {
+        try {
+          setCustomSaleNames(JSON.parse(a));
+        } catch (e) {}
       }
-      try {
-        const b = await storage.get("presets:expense");
-        if (b && b.value) setCustomExpenseNames(JSON.parse(b.value));
-      } catch (e) {
-        /* ignore */
+      const b = await kget("presets:expense");
+      if (b) {
+        try {
+          setCustomExpenseNames(JSON.parse(b));
+        } catch (e) {}
       }
     })();
   }, []);
@@ -921,22 +998,14 @@ export default function LedgerApp() {
     const next = [...(kind === "sale" ? customSaleNames : customExpenseNames), name];
     if (kind === "sale") setCustomSaleNames(next);
     else setCustomExpenseNames(next);
-    try {
-      await storage.set(kind === "sale" ? "presets:sale" : "presets:expense", JSON.stringify(next));
-    } catch (e) {
-      console.error("preset save failed", e);
-    }
+    await kset(kind === "sale" ? "presets:sale" : "presets:expense", JSON.stringify(next));
   };
 
   const removePresetName = async (kind, name) => {
     const next = (kind === "sale" ? customSaleNames : customExpenseNames).filter((n) => n !== name);
     if (kind === "sale") setCustomSaleNames(next);
     else setCustomExpenseNames(next);
-    try {
-      await storage.set(kind === "sale" ? "presets:sale" : "presets:expense", JSON.stringify(next));
-    } catch (e) {
-      console.error("preset save failed", e);
-    }
+    await kset(kind === "sale" ? "presets:sale" : "presets:expense", JSON.stringify(next));
   };
 
   // চিপে ট্যাপ করলে প্রথম খালি-নামের সারিতে বসে, না থাকলে নতুন সারি যোগ হয়
@@ -1124,10 +1193,7 @@ export default function LedgerApp() {
       const list = await loadManualDues();
       list.push({ id: emptyRowId(), y: yy, m: mm, d: dd, name, amount });
       const ok = await saveManualDues(list);
-      if (!ok) {
-        window.alert("বাকি সেভ হয়নি — ইন্টারনেট চেক করে আবার চেষ্টা করুন।");
-        return;
-      }
+      if (!ok) window.alert("সার্ভারে সেভ হয়নি, তবে বাকি ফোনে জমা আছে — নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হবে। হারাবে না।");
       setNewDue({ name: "", amount: "", date: "" });
       setAllDues(await loadAllDuesFlat());
     } finally {
@@ -1237,10 +1303,7 @@ export default function LedgerApp() {
       if (at >= 0) yearList[at] = record;
       else yearList.push(record);
       const ok = await saveMemosYear(record.y, yearList);
-      if (!ok) {
-        window.alert("মেমো সেভ হয়নি — ইন্টারনেট চেক করে আবার চেষ্টা করুন।");
-        return;
-      }
+      if (!ok) window.alert("সার্ভারে সেভ হয়নি, তবে মেমো ফোনে জমা আছে — নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হবে। হারাবে না।");
       // তারিখের সন বদলালে আগের সনের লিস্ট থেকে সরানো
       if (draft.id && draft.origY && draft.origY !== record.y) {
         const oldList = (await loadMemosYear(draft.origY)).filter((x) => x.id !== record.id);
@@ -1508,12 +1571,15 @@ export default function LedgerApp() {
         setMonthEntries(refreshed);
       }
       resetDraft(year || ty, month || tm);
+      if (pendingCount() > 0)
+        window.alert("⚠️ কিছু সেভ এখনো সার্ভারে যায়নি — তবে সব ফোনে জমা আছে, নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হবে। হারাবে না।");
     } finally {
       setSaving(false);
     }
   };
 
   const deleteExpenseRow = async (y, m, d, id) => {
+    if (!window.confirm("এই খরচের সারিটা মুছে ফেলবেন?")) return;
     const raw = await loadDay(y, m, d);
     const expensesArr = raw.expenses.filter((r) => isMeaningfulExpense(r) && r.id !== id);
     await recomputeAndSaveDay(y, m, d, { ...raw, expenses: expensesArr });
@@ -1521,6 +1587,7 @@ export default function LedgerApp() {
   };
 
   const deleteSaleRow = async (y, m, d, id) => {
+    if (!window.confirm("এই বিক্রির সারিটা মুছে ফেলবেন?")) return;
     const raw = await loadDay(y, m, d);
     const itemsArr = raw.items.filter((r) => isMeaningfulItem(r) && r.id !== id);
     await recomputeAndSaveDay(y, m, d, { ...raw, items: itemsArr });
@@ -1713,7 +1780,7 @@ export default function LedgerApp() {
             const dueToday = s ? s.items.reduce((a, it) => a + dueRemaining(it), 0) : 0;
             const profit = sale - expense;
             const money = (n) => `${n < 0 ? "−" : ""}৳ ${toBn(fmt(Math.abs(n)))}`;
-            const val = (n) => (todayLoading && !s ? "…" : money(n));
+            const val = (n) => (!s ? "—" : todayLoading ? "…" : money(n));
             const card = { background: "#FFFFFF", borderRadius: 22 };
             const stats = [
               { label: "মোট জমা", value: paid, color: "#3E7D5A", icon: <Wallet size={28} strokeWidth={1.8} /> },
@@ -2960,238 +3027,6 @@ export default function LedgerApp() {
                 </div>
               )}
             </div>
-          </>
-        )}
-
-
-        {/* ---------- DAY DETAIL ---------- */}
-        {view === "day" && (
-          <>
-            <HeaderBar
-              title={`${toBn(day)} ${MONTH_NAMES[month - 1]}, ${toBn(year)}`}
-              onBack={() => setView("days")}
-              editMode={editMode}
-              onToggleMode={toggleEditMode}
-            />
-
-            {loading ? (
-              <div className="flex-1 flex items-center justify-center py-20" style={{ color: "#8C2F26" }}>
-                লোড হচ্ছে…
-              </div>
-            ) : (
-              <>
-                {!editMode && (
-                  <div
-                    className="mx-3 mt-3 px-3 py-2 rounded-sm flex items-center gap-2"
-                    style={{ background: "#EFE3C8", color: "#7A2820", fontSize: 12 }}
-                  >
-                    <Eye size={13} /> ভিউ মোড — শুধু দেখা যাচ্ছে, এডিট করতে উপরে বাটনে চাপুন
-                  </div>
-                )}
-                <div
-                  className="flex-1 px-3 pt-4 pb-10"
-                  style={editMode ? undefined : { pointerEvents: "none", opacity: 0.8 }}
-                >
-                  {/* --- Expenses section (compact) --- */}
-                  <SectionTitle label="খরচ" />
-                  <div className="rounded-sm overflow-hidden mb-5" style={{ border: "1px solid #D9CBA8" }}>
-                    <div className="grid" style={{ gridTemplateColumns: "1fr 64px 22px", background: "#8C2F26" }}>
-                      <Th small>বিবরণ</Th>
-                      <Th right small>টাকা</Th>
-                      <Th />
-                    </div>
-                    {expenses.map((row) => (
-                      <div
-                        key={row.id}
-                        className="grid items-center"
-                        style={{ gridTemplateColumns: "1fr 64px 22px", borderTop: "1px solid #EADFC4", background: "#FFFDF7" }}
-                      >
-                        <input
-                          value={row.name}
-                          onChange={(e) => updateExpense(row.id, "name", e.target.value)}
-                          placeholder="যেমন: নাস্তা"
-                          className="min-w-0 px-1.5 py-1.5 bg-transparent outline-none"
-                          style={{ fontSize: 12.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={row.amount}
-                          onChange={(e) => updateExpense(row.id, "amount", e.target.value)}
-                          inputMode="decimal"
-                          placeholder="0"
-                          className="min-w-0 w-full px-1 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 12.5, color: "#2A211B" }}
-                        />
-                        <button
-                          onClick={() => setExpenses((rows) => rows.filter((r) => r.id !== row.id))}
-                          className="flex items-center justify-center h-full active:opacity-60"
-                          style={{ color: "#B5473C" }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      onClick={() => setExpenses((rows) => [...rows, newExpenseRow()])}
-                      className="w-full flex items-center justify-center gap-1 py-2 active:opacity-70"
-                      style={{ background: "#F3ECDD", color: "#8C2F26", fontSize: 12.5, borderTop: "1px solid #EADFC4" }}
-                    >
-                      <Plus size={13} /> খরচ যোগ করুন
-                    </button>
-                  </div>
-
-                  {/* --- Sale section --- */}
-                  <SectionTitle label="বিক্রি" />
-                  <div className="rounded-sm overflow-hidden mb-5" style={{ border: "1px solid #D9CBA8" }}>
-                    <div
-                      className="grid items-center"
-                      style={{ gridTemplateColumns: "1fr 30px 30px 40px 30px 34px 32px 30px 18px", background: "#B98B3E" }}
-                    >
-                      <Th small>নাম</Th>
-                      <Th right small>হাইট</Th>
-                      <Th right small>ওয়েট</Th>
-                      <Th right small>পরিমান</Th>
-                      <Th right small>দাম</Th>
-                      <Th right small>মোট</Th>
-                      <Th right small>বাকি</Th>
-                      <Th right small>ছাড়</Th>
-                      <Th />
-                    </div>
-                    {items.map((row) => (
-                      <div
-                        key={row.id}
-                        className="grid items-center"
-                        style={{
-                          gridTemplateColumns: "1fr 30px 30px 40px 30px 34px 32px 30px 18px",
-                          borderTop: "1px solid #EADFC4",
-                          background: "#FFFDF7",
-                        }}
-                      >
-                        <input
-                          value={row.name}
-                          onChange={(e) => updateItem(row.id, "name", e.target.value)}
-                          placeholder="নাম"
-                          className="min-w-0 px-1 py-1.5 bg-transparent outline-none"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={row.height}
-                          onChange={(e) => updateItem(row.id, "height", e.target.value)}
-                          inputMode="decimal"
-                          placeholder="—"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={row.weight}
-                          onChange={(e) => updateItem(row.id, "weight", e.target.value)}
-                          inputMode="decimal"
-                          placeholder="—"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={row.qty}
-                          onChange={(e) => updateItem(row.id, "qty", e.target.value)}
-                          inputMode="decimal"
-                          placeholder="1"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <input
-                          value={row.price}
-                          onChange={(e) => updateItem(row.id, "price", e.target.value)}
-                          inputMode="decimal"
-                          placeholder="0"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#2A211B" }}
-                        />
-                        <div className="px-0.5 py-1.5 text-right truncate" style={{ fontSize: 10.5, color: "#5B3E1B", fontWeight: 600 }}>
-                          {fmt(netTotal(row))}
-                        </div>
-                        <input
-                          value={row.due}
-                          onChange={(e) => updateItem(row.id, "due", e.target.value)}
-                          inputMode="decimal"
-                          placeholder="0"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#B5473C", fontWeight: 600 }}
-                        />
-                        <input
-                          value={row.discount}
-                          onChange={(e) => updateItem(row.id, "discount", e.target.value)}
-                          inputMode="decimal"
-                          placeholder="0"
-                          className="min-w-0 w-full px-0 py-1.5 bg-transparent outline-none text-right"
-                          style={{ fontSize: 10.5, color: "#8C6A2F", fontWeight: 600 }}
-                        />
-                        <button
-                          onClick={() => setItems((rows) => rows.filter((r) => r.id !== row.id))}
-                          className="flex items-center justify-center h-full active:opacity-60"
-                          style={{ color: "#B5473C" }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      onClick={() => setItems((rows) => [...rows, newItemRow()])}
-                      className="w-full flex items-center justify-center gap-1 py-2 active:opacity-70"
-                      style={{ background: "#F3ECDD", color: "#8C2F26", fontSize: 12.5, borderTop: "1px solid #EADFC4" }}
-                    >
-                      <Plus size={13} /> বিক্রি যোগ করুন
-                    </button>
-                    <p className="px-3 py-1.5" style={{ fontSize: 10.5, color: "#8A7A5C", background: "#F3ECDD" }}>
-                      মোট = (হাইট × ওয়েট × পরিমান × দাম) − বাকি − ছাড়।
-                    </p>
-                  </div>
-
-                  {/* --- Summary --- */}
-                  <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #8C2F26" }}>
-                    <SummaryRow
-                      label="ইজা টাকা ="
-                      value={
-                        <input
-                          value={openingOverride ?? opening}
-                          onChange={(e) => setOpeningOverride(e.target.value === "" ? "" : e.target.value)}
-                          onBlur={(e) => {
-                            if (e.target.value === "") setOpeningOverride(null);
-                          }}
-                          inputMode="decimal"
-                          className="bg-transparent outline-none text-right w-full"
-                          style={{ fontWeight: 700, color: "#2A211B" }}
-                        />
-                      }
-                      editableHint="অটো আসে, চাইলে বদলান"
-                    />
-                    <SummaryRow label="বিক্রি মোট =" value={fmt(itemsTotal)} />
-                    <SummaryRow label="(এর মধ্যে বাকি)" value={fmt(duesTotalDay)} muted />
-                    <SummaryRow label="(এর মধ্যে ছাড়)" value={fmt(discountTotalDay)} muted />
-                    <SummaryRow
-                      label="মোট টাকা ="
-                      value={
-                        <input
-                          value={totalOverride ?? computedTotalMoney}
-                          onChange={(e) => setTotalOverride(e.target.value === "" ? "" : e.target.value)}
-                          onBlur={(e) => {
-                            if (e.target.value === "") setTotalOverride(null);
-                          }}
-                          inputMode="decimal"
-                          className="bg-transparent outline-none text-right w-full"
-                          style={{ fontWeight: 700, color: "#2A211B" }}
-                        />
-                      }
-                      editableHint="অটো আসে, চাইলে বদলান"
-                    />
-                    <SummaryRow label="মোট খরচ = (-)" value={fmt(expenseTotal)} negative />
-                    <SummaryRow label="অবশিষ্ট =" value={fmt(remaining)} strong />
-                  </div>
-
-                  <button onClick={clearDay} className="mt-6 mx-auto block px-4 py-2 active:opacity-70" style={{ fontSize: 12, color: "#B5473C" }}>
-                    এই দিনের হিসাব মুছে ফেলুন
-                  </button>
-                </div>
-              </>
-            )}
           </>
         )}
       </div>
