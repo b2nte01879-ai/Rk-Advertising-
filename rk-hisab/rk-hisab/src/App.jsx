@@ -505,21 +505,21 @@ function printCustomerMemo(memo) {
     <html><head><title>মেমো নং ${toBn(memo.no)} — ${esc(memo.customer)}</title>
     <meta charset="utf-8" />
     <style>
-      body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#2A211B;}
-      .letterhead{text-align:center;border-bottom:2px solid #8C2F26;padding-bottom:10px;margin-bottom:14px;}
-      .letterhead h1{color:#8C2F26;font-size:22px;margin:0;}
-      .letterhead p{color:#6B5D4A;font-size:12px;margin:4px 0 0;}
+      body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#1B2340;}
+      .letterhead{text-align:center;border-bottom:2px solid #1F2F5C;padding-bottom:10px;margin-bottom:14px;}
+      .letterhead h1{color:#1F2F5C;font-size:22px;margin:0;}
+      .letterhead p{color:#6B7390;font-size:12px;margin:4px 0 0;}
       .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;}
       .cust{font-size:13.5px;margin-bottom:14px;line-height:1.6;}
       table{width:100%;border-collapse:collapse;}
-      th,td{border:1px solid #D9CBA8;padding:5px 8px;font-size:12.5px;}
-      th{background:#8C2F26;color:#fff;text-align:left;}
+      th,td{border:1px solid #D9DDEB;padding:5px 8px;font-size:12.5px;}
+      th{background:#1F2F5C;color:#fff;text-align:left;}
       .summary{width:300px;margin-left:auto;margin-top:16px;}
       .summary td{border:none;padding:3px 4px;font-size:13px;}
-      .summary tr.total td{border-top:2px solid #8C2F26;font-weight:bold;font-size:15px;color:#8C2F26;}
-      .note{margin-top:14px;font-size:12.5px;color:#6B5D4A;}
-      .sign{display:flex;justify-content:space-between;margin-top:56px;font-size:12px;color:#6B5D4A;}
-      .sign span{border-top:1px solid #6B5D4A;padding-top:4px;min-width:130px;text-align:center;}
+      .summary tr.total td{border-top:2px solid #1F2F5C;font-weight:bold;font-size:15px;color:#1F2F5C;}
+      .note{margin-top:14px;font-size:12.5px;color:#6B7390;}
+      .sign{display:flex;justify-content:space-between;margin-top:56px;font-size:12px;color:#6B7390;}
+      .sign span{border-top:1px solid #6B7390;padding-top:4px;min-width:130px;text-align:center;}
       @media print{ body{padding:10mm;} }
     </style>
     </head><body>
@@ -567,24 +567,24 @@ const Tab = ({ index, label, sub, onClick }) => (
   <button onClick={onClick} className="w-full flex items-stretch text-left group">
     <div
       className="flex items-center justify-center shrink-0"
-      style={{ width: 56, background: "#8C2F26", color: "#F3ECDD", fontFamily: "'Noto Serif Bengali', serif", fontSize: 20 }}
+      style={{ width: 56, background: "#1F2F5C", color: "#F5F6FA", fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 20 }}
     >
       {index}
     </div>
     <div
-      className="flex-1 flex items-center justify-between px-4 py-4 border-b transition-colors group-active:bg-[#e9dfc9]"
-      style={{ borderColor: "#D9CBA8" }}
+      className="flex-1 flex items-center justify-between px-4 py-4 border-b transition-colors group-active:bg-[#E3E7F3]"
+      style={{ borderColor: "#D9DDEB" }}
     >
-      <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 19, color: "#2A211B" }}>{label}</span>
+      <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 19, color: "#1B2340" }}>{label}</span>
       {sub && (
-        <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 13, color: "#8C2F26" }}>{sub}</span>
+        <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 13, color: "#1F2F5C" }}>{sub}</span>
       )}
     </div>
   </button>
 );
 
 // মেনু বাটন — items: [{ label, icon, onClick, disabled }]
-const HamburgerMenu = ({ items, icon, buttonStyle, buttonClass, align = "left", accent = "#8C2F26" }) => {
+const HamburgerMenu = ({ items, icon, buttonStyle, buttonClass, align = "left", accent = "#1F2F5C" }) => {
   const [open, setOpen] = useState(false);
   return (
     <div className={align === "right" ? "relative" : "relative -ml-1"}>
@@ -639,7 +639,7 @@ const HamburgerMenu = ({ items, icon, buttonStyle, buttonClass, align = "left", 
 };
 
 const HeaderBar = ({ title, onBack, editMode, onToggleMode, menuItems }) => (
-  <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{ background: "#7A2820", color: "#F3ECDD" }}>
+  <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{ background: "#1F2F5C", color: "#F5F6FA" }}>
     {menuItems && <HamburgerMenu items={menuItems} />}
     {onBack && (
       <button onClick={onBack} className="p-1 -ml-1 active:opacity-60">
@@ -647,12 +647,12 @@ const HeaderBar = ({ title, onBack, editMode, onToggleMode, menuItems }) => (
       </button>
     )}
     <BookOpen size={18} style={{ opacity: 0.85 }} />
-    <h1 className="flex-1" style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 19 }}>{title}</h1>
+    <h1 className="flex-1" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 19 }}>{title}</h1>
     {onToggleMode && (
       <button
         onClick={onToggleMode}
-        className="flex items-center gap-1 px-2 py-1 rounded-sm active:opacity-70"
-        style={{ background: "rgba(243,236,221,0.15)", fontSize: 11 }}
+        className="flex items-center gap-1 px-2 py-1 rounded-xl active:opacity-70"
+        style={{ background: "rgba(255,255,255,0.18)", fontSize: 11 }}
       >
         {editMode ? <Pencil size={13} /> : <Eye size={13} />}
         {editMode ? "এডিট মোড" : "ভিউ মোড"}
@@ -664,14 +664,14 @@ const HeaderBar = ({ title, onBack, editMode, onToggleMode, menuItems }) => (
 const Th = ({ children, right, small }) => (
   <div
     className={`${small ? "px-0.5" : "px-2"} py-2 whitespace-nowrap ${right ? "text-right" : "text-left"}`}
-    style={{ color: "#F3ECDD", fontSize: small ? 10.5 : 12, fontWeight: 600 }}
+    style={{ color: "#F5F6FA", fontSize: small ? 10.5 : 12, fontWeight: 600 }}
   >
     {children}
   </div>
 );
 
 const SectionTitle = ({ label }) => (
-  <div style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#7A2820", marginBottom: 8, paddingLeft: 2 }}>
+  <div style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C", marginBottom: 8, paddingLeft: 2 }}>
     {label}
   </div>
 );
@@ -680,8 +680,8 @@ const SummaryRow = ({ label, value, negative, strong, muted, editableHint }) => 
   <div
     className="grid grid-cols-[1fr,110px] items-center px-3 leading-none"
     style={{
-      background: strong ? "#8C2F26" : "#FFFDF7",
-      borderTop: "1px solid #EADFC4",
+      background: strong ? "#1F2F5C" : "#FFFFFF",
+      borderTop: "1px solid #E8EAF2",
       paddingTop: muted ? 2 : 3,
       paddingBottom: muted ? 2 : 3,
     }}
@@ -689,22 +689,22 @@ const SummaryRow = ({ label, value, negative, strong, muted, editableHint }) => 
     <div>
       <span
         style={{
-          fontFamily: "'Noto Serif Bengali', serif",
+          fontFamily: "'Noto Sans Bengali', sans-serif",
           fontWeight: muted ? 600 : 700,
           fontSize: strong ? 16 : muted ? 11 : 14.5,
-          color: strong ? "#F3ECDD" : muted ? "#C3B598" : "#2A211B",
+          color: strong ? "#F5F6FA" : muted ? "#AEB5CE" : "#1B2340",
         }}
       >
         {label}
       </span>
-      {editableHint && <div style={{ fontSize: 8, color: "#A6987A", marginTop: 1, lineHeight: 1 }}>{editableHint}</div>}
+      {editableHint && <div style={{ fontSize: 8, color: "#9AA1BA", marginTop: 1, lineHeight: 1 }}>{editableHint}</div>}
     </div>
     <div
       className="text-right"
       style={{
         fontSize: strong ? 19 : muted ? 11.5 : 15.5,
         fontWeight: muted ? 600 : 700,
-        color: strong ? "#F3ECDD" : negative ? "#B5473C" : muted ? "#C3B598" : "#2A211B",
+        color: strong ? "#F5F6FA" : negative ? "#B24A45" : muted ? "#AEB5CE" : "#1B2340",
       }}
     >
       {value}
@@ -735,27 +735,27 @@ const NameDropdown = ({ label, names, customNames, onPick, onAdd, onRemove }) =>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-3 py-2 rounded-sm active:opacity-80"
-        style={{ border: "1px solid #D9CBA8", background: "#FFFDF7", color: "#8C2F26", fontSize: 13.5 }}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-xl active:opacity-80"
+        style={{ border: "1px solid #D9DDEB", background: "#FFFFFF", color: "#1F2F5C", fontSize: 13.5 }}
       >
         <span>{label}</span>
         <ChevronDown size={17} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
       </button>
       {open && (
         <div
-          className="absolute left-0 right-0 z-20 mt-1 rounded-sm overflow-y-auto"
-          style={{ maxHeight: 224, border: "1px solid #8C2F26", background: "#FFFDF7", boxShadow: "0 6px 16px rgba(42,33,27,0.18)" }}
+          className="absolute left-0 right-0 z-20 mt-1 rounded-xl overflow-y-auto"
+          style={{ maxHeight: 224, border: "1px solid #1F2F5C", background: "#FFFFFF", boxShadow: "0 6px 16px rgba(31,47,92,0.18)" }}
         >
           {names.map((n, i) => (
-            <div key={n} className="flex items-center" style={{ borderTop: i > 0 ? "1px solid #EADFC4" : "none" }}>
+            <div key={n} className="flex items-center" style={{ borderTop: i > 0 ? "1px solid #E8EAF2" : "none" }}>
               <button
                 type="button"
                 onClick={() => {
                   onPick(n);
                   setOpen(false);
                 }}
-                className="flex-1 text-left px-3 py-2 active:bg-[#F3ECDD]"
-                style={{ fontSize: 13.5, color: "#2A211B" }}
+                className="flex-1 text-left px-3 py-2 active:bg-[#F5F6FA]"
+                style={{ fontSize: 13.5, color: "#1B2340" }}
               >
                 {n}
               </button>
@@ -764,7 +764,7 @@ const NameDropdown = ({ label, names, customNames, onPick, onAdd, onRemove }) =>
                   type="button"
                   onClick={() => onRemove(n)}
                   className="px-3 py-2 active:opacity-60"
-                  style={{ color: "#B5473C", fontSize: 16, lineHeight: 1 }}
+                  style={{ color: "#B24A45", fontSize: 16, lineHeight: 1 }}
                   aria-label={`${n} মুছুন`}
                 >
                   ×
@@ -778,8 +778,8 @@ const NameDropdown = ({ label, names, customNames, onPick, onAdd, onRemove }) =>
               setOpen(false);
               onAdd();
             }}
-            className="w-full text-left px-3 py-2 active:bg-[#F3ECDD]"
-            style={{ borderTop: "1px solid #8C2F26", color: "#8C2F26", fontSize: 13, fontWeight: 600 }}
+            className="w-full text-left px-3 py-2 active:bg-[#F5F6FA]"
+            style={{ borderTop: "1px solid #1F2F5C", color: "#1F2F5C", fontSize: 13, fontWeight: 600 }}
           >
             + নতুন নাম যোগ করুন
           </button>
@@ -1341,84 +1341,6 @@ export default function LedgerApp() {
     return obj;
   }
 
-  const printDayMemo = (y, m, d, dayData) => {
-    const win = window.open("", "_blank");
-    if (!win) return;
-
-    const saleRows = dayData.items
-      .map(
-        (it) => `<tr>
-          <td>${it.name || ""}</td>
-          <td style="text-align:right">${it.height || "—"}</td>
-          <td style="text-align:right">${it.weight || "—"}</td>
-          <td style="text-align:right">${it.qty || "১"}</td>
-          <td style="text-align:right">${fmt(num(it.price) || 0)}</td>
-          <td style="text-align:right">${fmt(netTotal(it))}</td>
-          <td style="text-align:right">${fmt(num(it.due) || 0)}</td>
-          <td style="text-align:right">${fmt(num(it.discount) || 0)}</td>
-        </tr>`
-      )
-      .join("");
-
-    const expenseRows = dayData.expenses
-      .map((e) => `<tr><td>${e.name || ""}</td><td style="text-align:right">${fmt(num(e.amount) || 0)}</td></tr>`)
-      .join("");
-
-    win.document.write(`
-      <html><head><title>মেমো — ${toBn(d)} ${MONTH_NAMES[m - 1]} ${toBn(y)}</title>
-      <meta charset="utf-8" />
-      <style>
-        body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#2A211B;}
-        .letterhead{text-align:center;border-bottom:2px solid #8C2F26;padding-bottom:10px;margin-bottom:14px;}
-        .letterhead h1{color:#8C2F26;font-size:22px;margin:0;}
-        .letterhead p{color:#6B5D4A;font-size:12px;margin:4px 0 0;}
-        .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:14px;}
-        h2{font-size:14px;color:#8C2F26;margin:16px 0 6px;}
-        table{width:100%;border-collapse:collapse;}
-        th,td{border:1px solid #D9CBA8;padding:5px 8px;font-size:12.5px;}
-        th{background:#8C2F26;color:#fff;text-align:left;}
-        .exp-th{background:#B98B3E;}
-        .summary{width:320px;margin-left:auto;margin-top:16px;}
-        .summary td{border:none;padding:3px 4px;font-size:13px;}
-        .summary tr.total td{border-top:2px solid #8C2F26;font-weight:bold;font-size:15px;color:#8C2F26;}
-        @media print{ body{padding:10mm;} }
-      </style>
-      </head><body>
-        <div class="letterhead">
-          <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
-          <p>আবুল বিড়ি ফ্যাক্টরির বিপরীতে, ডি.টি রোড, পাহাড়তলী, চট্টগ্রাম</p>
-          <p>ফোন: ০১৭৯৬২১৬৮৩৩</p>
-        </div>
-        <div class="meta">
-          <span>তারিখ: ${toBn(d)} ${MONTH_NAMES[m - 1]}, ${toBn(y)} (${getWeekday(y, m, d)})</span>
-        </div>
-
-        <h2>বিক্রি</h2>
-        <table>
-          <thead><tr><th>নাম</th><th>হাইট</th><th>ওয়েট</th><th>পরিমান</th><th>দাম</th><th>মোট</th><th>বাকি</th><th>ছাড়</th></tr></thead>
-          <tbody>${saleRows || '<tr><td colspan="8" style="text-align:center;color:#8A7A5C">কোনো বিক্রি নেই</td></tr>'}</tbody>
-        </table>
-
-        <h2>খরচ</h2>
-        <table>
-          <thead><tr><th class="exp-th">বিবরণ</th><th class="exp-th" style="text-align:right">টাকা</th></tr></thead>
-          <tbody>${expenseRows || '<tr><td colspan="2" style="text-align:center;color:#8A7A5C">কোনো খরচ নেই</td></tr>'}</tbody>
-        </table>
-
-        <table class="summary">
-          <tr><td>ইজা টাকা</td><td style="text-align:right">${fmt(dayData.opening)}</td></tr>
-          <tr><td>বিক্রি মোট</td><td style="text-align:right">${fmt(dayData.itemsTotal)}</td></tr>
-          <tr><td>মোট টাকা</td><td style="text-align:right">${fmt(dayData.totalMoney)}</td></tr>
-          <tr><td>মোট খরচ (-)</td><td style="text-align:right">${fmt(dayData.expenseTotal)}</td></tr>
-          <tr class="total"><td>অবশিষ্ট</td><td style="text-align:right">${fmt(dayData.remaining)}</td></tr>
-        </table>
-      </body></html>
-    `);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 300);
-  };
-
   const printMonthReport = (y, m, entries) => {
     const win = window.open("", "_blank");
     if (!win) return;
@@ -1439,13 +1361,13 @@ export default function LedgerApp() {
       <html><head><title>${MONTH_NAMES[m - 1]} ${y} - R.K Advertising</title>
       <meta charset="utf-8" />
       <style>
-        body{font-family:'Noto Sans Bengali',sans-serif;padding:24px;color:#2A211B;}
-        h1{color:#8C2F26;font-size:18px;margin-bottom:2px;}
-        p.sub{color:#6B5D4A;font-size:12px;margin-top:0;}
+        body{font-family:'Noto Sans Bengali',sans-serif;padding:24px;color:#1B2340;}
+        h1{color:#1F2F5C;font-size:18px;margin-bottom:2px;}
+        p.sub{color:#6B7390;font-size:12px;margin-top:0;}
         table{width:100%;border-collapse:collapse;margin-top:14px;}
-        th,td{border:1px solid #D9CBA8;padding:6px 10px;font-size:13px;}
-        th{background:#8C2F26;color:#fff;text-align:left;}
-        tfoot td{font-weight:bold;background:#EFE3C8;}
+        th,td{border:1px solid #D9DDEB;padding:6px 10px;font-size:13px;}
+        th{background:#1F2F5C;color:#fff;text-align:left;}
+        tfoot td{font-weight:bold;background:#E8EBF5;}
       </style>
       </head><body>
       <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
@@ -1701,23 +1623,23 @@ export default function LedgerApp() {
 
   if (checkingLock) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center" style={{ background: "#F3ECDD" }}>
-        <p style={{ fontFamily: "'Noto Serif Bengali', serif", color: "#8C2F26" }}>লোড হচ্ছে…</p>
+      <div className="min-h-screen w-full flex items-center justify-center" style={{ background: "#F5F6FA" }}>
+        <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", color: "#1F2F5C" }}>লোড হচ্ছে…</p>
       </div>
     );
   }
 
   if (!unlocked) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center px-6" style={{ background: "#F3ECDD" }}>
+      <div className="min-h-screen w-full flex items-center justify-center px-6" style={{ background: "#F5F6FA" }}>
         <div className="text-center max-w-xs">
-          <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 18, color: "#8C2F26", marginBottom: 14 }}>
+          <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 18, color: "#1F2F5C", marginBottom: 14 }}>
             পাসওয়ার্ড ছাড়া এই পাতা দেখা যাবে না
           </p>
           <button
             onClick={() => window.location.reload()}
-            className="px-4 py-2 rounded-sm"
-            style={{ background: "#8C2F26", color: "#F3ECDD", fontWeight: 600 }}
+            className="px-4 py-2 rounded-xl"
+            style={{ background: "#1F2F5C", color: "#F5F6FA", fontWeight: 600 }}
           >
             আবার চেষ্টা করুন
           </button>
@@ -1727,7 +1649,7 @@ export default function LedgerApp() {
   }
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[#E4D8BE] lg:bg-[#F3ECDD]">
+    <div className="min-h-screen w-full flex justify-center bg-[#E4E7F1] lg:bg-[#F5F6FA]">
       <style>{`
         @media (min-width: 1024px) {
           .rk-zoom { zoom: 1.35; }
@@ -1762,7 +1684,7 @@ export default function LedgerApp() {
       </datalist>
       <div
         className="rk-zoom min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto lg:max-w-6xl lg:h-screen lg:my-0 lg:rounded-none lg:shadow-none"
-        style={{ background: "#F3ECDD", fontFamily: "'Noto Sans Bengali', sans-serif" }}
+        style={{ background: "#F5F6FA", fontFamily: "'Noto Sans Bengali', sans-serif" }}
       >
         {/* ---------- YEARS (ড্যাশবোর্ড) ---------- */}
         {view === "years" &&
@@ -1868,30 +1790,42 @@ export default function LedgerApp() {
                   </div>
                 </button>
 
-                {/* বছর বেছে নিন */}
+                {/* বছর বেছে নিন — ২টা ঘর: চলতি বছর | পরের বছরগুলো */}
                 <div className="px-5 py-4" style={card}>
                   <p style={{ color: GRAY, fontSize: 14, marginBottom: 8 }}>বছর বেছে নিন</p>
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      const y = Number(e.target.value);
-                      if (y) {
-                        setYear(y);
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => {
+                        setYear(_NOW_YEAR);
                         setView("months");
-                      }
-                    }}
-                    className="w-full px-4 py-3 outline-none"
-                    style={{ border: `1px solid ${NAVY}`, background: "#F5F6FA", color: NAVY, fontSize: 16, fontWeight: 600, borderRadius: 14 }}
-                  >
-                    <option value="" disabled>
-                      একটা সন সিলেক্ট করুন
-                    </option>
-                    {YEARS.map((y) => (
-                      <option key={y} value={y}>
-                        সন {toBn(y)}
+                      }}
+                      className="px-4 py-3 active:opacity-80"
+                      style={{ border: `1px solid ${NAVY}`, background: NAVY, color: "#FFFFFF", fontSize: 16, fontWeight: 700, borderRadius: 14 }}
+                    >
+                      সন {toBn(_NOW_YEAR)}
+                    </button>
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const y = Number(e.target.value);
+                        if (y) {
+                          setYear(y);
+                          setView("months");
+                        }
+                      }}
+                      className="w-full px-3 py-3 outline-none"
+                      style={{ border: `1px solid ${NAVY}`, background: "#F5F6FA", color: NAVY, fontSize: 16, fontWeight: 600, borderRadius: 14 }}
+                    >
+                      <option value="" disabled>
+                        {toBn(_NOW_YEAR + 1)} – {toBn(YEARS[YEARS.length - 1])}
                       </option>
-                    ))}
-                  </select>
+                      {YEARS.filter((y) => y > _NOW_YEAR).map((y) => (
+                        <option key={y} value={y}>
+                          সন {toBn(y)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
             );
@@ -1903,8 +1837,8 @@ export default function LedgerApp() {
             <HeaderBar title="বাকির লিস্ট" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
             <div className="px-3 pt-4 pb-8">
               {editMode && (
-                <div className="rounded-sm mb-4 px-3 py-3" style={{ border: "1px solid #8C2F26", background: "#F3ECDD" }}>
-                  <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#8C2F26", marginBottom: 8 }}>
+                <div className="rounded-xl mb-4 px-3 py-3" style={{ border: "1px solid #1F2F5C", background: "#F5F6FA" }}>
+                  <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 15, color: "#1F2F5C", marginBottom: 8 }}>
                     সরাসরি বাকি যোগ করুন
                   </p>
                   <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 92px" }}>
@@ -1913,16 +1847,16 @@ export default function LedgerApp() {
                       onChange={(ev) => setNewDue((p) => ({ ...p, name: ev.target.value }))}
                       list="due-name-options"
                       placeholder="কার বাকি (নাম)"
-                      className="min-w-0 px-2 py-2 rounded-sm outline-none"
-                      style={{ fontSize: 14, border: "1px solid #D9CBA8", background: "#FFFDF7" }}
+                      className="min-w-0 px-2 py-2 rounded-xl outline-none"
+                      style={{ fontSize: 14, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
                     />
                     <input
                       value={newDue.amount}
                       onChange={(ev) => setNewDue((p) => ({ ...p, amount: ev.target.value }))}
                       inputMode="decimal"
                       placeholder="টাকা"
-                      className="min-w-0 px-2 py-2 rounded-sm outline-none text-right"
-                      style={{ fontSize: 14, border: "1px solid #D9CBA8", background: "#FFFDF7", color: "#B5473C", fontWeight: 600 }}
+                      className="min-w-0 px-2 py-2 rounded-xl outline-none text-right"
+                      style={{ fontSize: 14, border: "1px solid #D9DDEB", background: "#FFFFFF", color: "#B24A45", fontWeight: 600 }}
                     />
                   </div>
                   <div className="flex items-center gap-2 mt-2">
@@ -1930,14 +1864,14 @@ export default function LedgerApp() {
                       type="date"
                       value={newDue.date || todayInputValue()}
                       onChange={(ev) => setNewDue((p) => ({ ...p, date: ev.target.value }))}
-                      className="min-w-0 px-2 py-1.5 rounded-sm outline-none"
-                      style={{ fontSize: 12.5, border: "1px solid #D9CBA8", background: "#FFFDF7" }}
+                      className="min-w-0 px-2 py-1.5 rounded-xl outline-none"
+                      style={{ fontSize: 12.5, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
                     />
                     <button
                       onClick={handleAddManualDue}
                       disabled={addingDue}
-                      className="ml-auto flex items-center gap-1 px-3 py-2 rounded-sm active:opacity-80"
-                      style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 13, fontWeight: 600 }}
+                      className="ml-auto flex items-center gap-1 px-3 py-2 rounded-xl active:opacity-80"
+                      style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 13, fontWeight: 600 }}
                     >
                       <Plus size={14} /> {addingDue ? "…" : "বাকি যোগ করুন"}
                     </button>
@@ -1945,12 +1879,12 @@ export default function LedgerApp() {
                 </div>
               )}
               {allDuesLoading ? (
-                <p style={{ fontSize: 12, color: "#8A7A5C" }}>লোড হচ্ছে…</p>
+                <p style={{ fontSize: 12, color: "#6B7390" }}>লোড হচ্ছে…</p>
               ) : allDues.length === 0 ? (
-                <p style={{ fontSize: 12, color: "#8A7A5C" }}>এখনও কোনো বাকি নেই।</p>
+                <p style={{ fontSize: 12, color: "#6B7390" }}>এখনও কোনো বাকি নেই।</p>
               ) : (
-                <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #8C2F26" }}>
-                  <div className="grid grid-cols-[84px,1fr,70px]" style={{ background: "#8C2F26" }}>
+                <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1F2F5C" }}>
+                  <div className="grid grid-cols-[84px,1fr,70px]" style={{ background: "#1F2F5C" }}>
                     <Th small>তারিখ</Th>
                     <Th>নাম</Th>
                     <Th right>বাকি</Th>
@@ -1961,35 +1895,35 @@ export default function LedgerApp() {
                     const key = `${e.y}-${e.m}-${e.d}-${e.id}`;
                     const input = paymentInputs[key] || {};
                     return (
-                      <div key={i} style={{ borderTop: "1px solid #EADFC4" }}>
+                      <div key={i} style={{ borderTop: "1px solid #E8EAF2" }}>
                         <div
                           className="grid grid-cols-[84px,1fr,70px] items-center"
                           style={{
-                            background: overdue ? "#FBEAE7" : "#FFFDF7",
-                            borderLeft: overdue ? "3px solid #B5473C" : "3px solid transparent",
+                            background: overdue ? "#FBEAE7" : "#FFFFFF",
+                            borderLeft: overdue ? "3px solid #B24A45" : "3px solid transparent",
                           }}
                         >
-                          <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B5D4A" }}>
+                          <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B7390" }}>
                             {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
                           </div>
-                          <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#2A211B" }}>
+                          <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#1B2340" }}>
                             {e.name}
                             {overdue && (
-                              <span style={{ fontSize: 9.5, color: "#B5473C", marginLeft: 5, fontWeight: 600 }}>
+                              <span style={{ fontSize: 9.5, color: "#B24A45", marginLeft: 5, fontWeight: 600 }}>
                                 ⚠ {toBn(daysAgo)} দিন
                               </span>
                             )}
                           </div>
-                          <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B5473C" }}>
+                          <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B24A45" }}>
                             {fmt(e.amount)}
                           </div>
                         </div>
                         {editMode && (
                           <div
                             className="flex items-center gap-1.5 px-2 py-1.5"
-                            style={{ background: "#F3ECDD", borderTop: "1px dashed #D9CBA8" }}
+                            style={{ background: "#F5F6FA", borderTop: "1px dashed #D9DDEB" }}
                           >
-                            <span style={{ fontSize: 10.5, color: "#8C2F26", fontWeight: 600, whiteSpace: "nowrap" }}>পরিশোধ:</span>
+                            <span style={{ fontSize: 10.5, color: "#1F2F5C", fontWeight: 600, whiteSpace: "nowrap" }}>পরিশোধ:</span>
                             <input
                               value={input.amount || ""}
                               onChange={(ev) =>
@@ -1997,8 +1931,8 @@ export default function LedgerApp() {
                               }
                               inputMode="decimal"
                               placeholder="টাকা"
-                              className="min-w-0 px-1.5 py-1 rounded-sm outline-none"
-                              style={{ width: 64, fontSize: 11, border: "1px solid #D9CBA8", background: "#FFFDF7" }}
+                              className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
+                              style={{ width: 64, fontSize: 11, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
                             />
                             <input
                               type="date"
@@ -2006,14 +1940,14 @@ export default function LedgerApp() {
                               onChange={(ev) =>
                                 setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], date: ev.target.value } }))
                               }
-                              className="min-w-0 px-1.5 py-1 rounded-sm outline-none"
-                              style={{ fontSize: 10.5, border: "1px solid #D9CBA8", background: "#FFFDF7" }}
+                              className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
+                              style={{ fontSize: 10.5, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
                             />
                             <button
                               onClick={() => handleSettlePayment(e, key)}
                               disabled={payingKey === key || !num(input.amount) || num(input.amount) <= 0}
-                              className="px-2.5 py-1 rounded-sm active:opacity-70 ml-auto"
-                              style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}
+                              className="px-2.5 py-1 rounded-xl active:opacity-70 ml-auto"
+                              style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}
                             >
                               {payingKey === key ? "…" : "জমা করুন"}
                             </button>
@@ -2021,7 +1955,7 @@ export default function LedgerApp() {
                               <button
                                 onClick={() => handleDeleteManualDue(e)}
                                 className="p-1 active:opacity-60"
-                                style={{ color: "#B5473C" }}
+                                style={{ color: "#B24A45" }}
                                 aria-label="এই বাকি মুছুন"
                               >
                                 <Trash2 size={14} />
@@ -2032,12 +1966,12 @@ export default function LedgerApp() {
                       </div>
                     );
                   })}
-                  <div className="grid grid-cols-[84px,1fr,70px] items-center" style={{ borderTop: "1px solid #8C2F26", background: "#EFE3C8" }}>
+                  <div className="grid grid-cols-[84px,1fr,70px] items-center" style={{ borderTop: "1px solid #1F2F5C", background: "#E8EBF5" }}>
                     <div />
-                    <div className="px-2 py-1.5" style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 13, color: "#7A2820" }}>
+                    <div className="px-2 py-1.5" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 13, color: "#1F2F5C" }}>
                       মোট বাকি
                     </div>
-                    <div className="px-2 py-1.5 text-right" style={{ fontSize: 13.5, fontWeight: 700, color: "#7A2820" }}>
+                    <div className="px-2 py-1.5 text-right" style={{ fontSize: 13.5, fontWeight: 700, color: "#1F2F5C" }}>
                       {fmt(allDues.reduce((s, e) => s + (e.amount || 0), 0))}
                     </div>
                   </div>
@@ -2065,30 +1999,30 @@ export default function LedgerApp() {
             {memoDraft &&
               (() => {
                 const calc = memoCalc(memoDraft);
-                const inputStyle = { fontSize: 14, color: "#2A211B", border: "1px solid #D9CBA8", background: "#FFFDF7" };
-                const selStyle = { fontSize: 13, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "4px 5px" };
+                const inputStyle = { fontSize: 14, color: "#1B2340", border: "1px solid #D9DDEB", background: "#FFFFFF" };
+                const selStyle = { fontSize: 13, background: "#FFFFFF", border: "1px solid #D9DDEB", padding: "4px 5px" };
                 const cols = "120px 46px 46px 52px 56px 64px 24px";
                 return (
                   <div className="px-3 pt-4 pb-10" style={editMode ? undefined : { pointerEvents: "none", opacity: 0.8 }}>
                     {/* তারিখ + কাস্টমার */}
-                    <div className="rounded-sm mb-4" style={{ border: "1px solid #8C2F26", background: "#F3ECDD" }}>
+                    <div className="rounded-xl mb-4" style={{ border: "1px solid #1F2F5C", background: "#F5F6FA" }}>
                       <div className="flex items-center justify-center gap-2 px-3 pt-3 pb-2">
-                        <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26" }}>তারিখ</span>
-                        <select value={memoDraft.d} onChange={(e) => setMemoDate("d", e.target.value)} className="rounded-sm" style={selStyle}>
+                        <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C" }}>তারিখ</span>
+                        <select value={memoDraft.d} onChange={(e) => setMemoDate("d", e.target.value)} className="rounded-xl" style={selStyle}>
                           {Array.from({ length: daysInMonth(memoDraft.y, memoDraft.m) }, (_, i) => i + 1).map((d) => (
                             <option key={d} value={d}>
                               {toBn(d)}
                             </option>
                           ))}
                         </select>
-                        <select value={memoDraft.m} onChange={(e) => setMemoDate("m", e.target.value)} className="rounded-sm" style={selStyle}>
+                        <select value={memoDraft.m} onChange={(e) => setMemoDate("m", e.target.value)} className="rounded-xl" style={selStyle}>
                           {MONTH_NAMES.map((mn, i) => (
                             <option key={mn} value={i + 1}>
                               {mn}
                             </option>
                           ))}
                         </select>
-                        <select value={memoDraft.y} onChange={(e) => setMemoDate("y", e.target.value)} className="rounded-sm" style={selStyle}>
+                        <select value={memoDraft.y} onChange={(e) => setMemoDate("y", e.target.value)} className="rounded-xl" style={selStyle}>
                           {YEARS.map((y) => (
                             <option key={y} value={y}>
                               {toBn(y)}
@@ -2102,7 +2036,7 @@ export default function LedgerApp() {
                           onChange={(e) => onMemoCustomerChange(e.target.value)}
                           list="memo-customer-options"
                           placeholder="কাস্টমারের নাম"
-                          className="w-full px-2 py-2 rounded-sm outline-none"
+                          className="w-full px-2 py-2 rounded-xl outline-none"
                           style={{ ...inputStyle, fontSize: 15 }}
                         />
                         <div className="grid grid-cols-2 gap-2 mt-2">
@@ -2111,14 +2045,14 @@ export default function LedgerApp() {
                             onChange={(e) => updateMemoField("phone", e.target.value)}
                             inputMode="tel"
                             placeholder="ফোন (ঐচ্ছিক)"
-                            className="min-w-0 px-2 py-2 rounded-sm outline-none"
+                            className="min-w-0 px-2 py-2 rounded-xl outline-none"
                             style={inputStyle}
                           />
                           <input
                             value={memoDraft.address}
                             onChange={(e) => updateMemoField("address", e.target.value)}
                             placeholder="ঠিকানা (ঐচ্ছিক)"
-                            className="min-w-0 px-2 py-2 rounded-sm outline-none"
+                            className="min-w-0 px-2 py-2 rounded-xl outline-none"
                             style={inputStyle}
                           />
                         </div>
@@ -2126,7 +2060,7 @@ export default function LedgerApp() {
                     </div>
 
                     {/* কী কী কিনেছে */}
-                    <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26", margin: "0 0 6px 2px" }}>
+                    <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C", margin: "0 0 6px 2px" }}>
                       কী কী কিনেছে
                     </p>
                     <NameDropdown
@@ -2137,9 +2071,9 @@ export default function LedgerApp() {
                       onAdd={() => addPresetName("sale")}
                       onRemove={(n) => removePresetName("sale", n)}
                     />
-                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
+                    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #D9DDEB" }}>
                       <div className="overflow-x-auto">
-                        <div className="grid items-center" style={{ gridTemplateColumns: cols, background: "#B98B3E", minWidth: 408 }}>
+                        <div className="grid items-center" style={{ gridTemplateColumns: cols, background: "#C97B2E", minWidth: 408 }}>
                           <Th>নাম</Th>
                           <Th right>হাইট</Th>
                           <Th right>ওয়েট</Th>
@@ -2152,7 +2086,7 @@ export default function LedgerApp() {
                           <div
                             key={row.id}
                             className="grid items-center"
-                            style={{ gridTemplateColumns: cols, background: "#FFFDF7", minWidth: 408, borderTop: idx > 0 ? "1px solid #EADFC4" : "none" }}
+                            style={{ gridTemplateColumns: cols, background: "#FFFFFF", minWidth: 408, borderTop: idx > 0 ? "1px solid #E8EAF2" : "none" }}
                           >
                             <input
                               value={row.name}
@@ -2160,7 +2094,7 @@ export default function LedgerApp() {
                               list="sale-name-options"
                               placeholder="নাম"
                               className="min-w-0 px-1.5 py-2 bg-transparent outline-none"
-                              style={{ fontSize: 14, color: "#2A211B" }}
+                              style={{ fontSize: 14, color: "#1B2340" }}
                             />
                             {["height", "weight", "qty", "price"].map((f) => (
                               <input
@@ -2170,32 +2104,32 @@ export default function LedgerApp() {
                                 inputMode="decimal"
                                 placeholder={f === "qty" ? "1" : f === "price" ? "0" : "—"}
                                 className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
-                                style={{ fontSize: 14, color: "#2A211B" }}
+                                style={{ fontSize: 14, color: "#1B2340" }}
                               />
                             ))}
-                            <div className="px-1 py-2 text-right truncate" style={{ fontSize: 14, color: "#5B3E1B", fontWeight: 700 }}>
+                            <div className="px-1 py-2 text-right truncate" style={{ fontSize: 14, color: "#1F2F5C", fontWeight: 700 }}>
                               {fmt(memoItemUsed(row) ? grossTotal(row) : 0)}
                             </div>
-                            <button onClick={() => removeMemoItem(idx)} className="flex items-center justify-center h-full" style={{ color: "#B5473C" }}>
+                            <button onClick={() => removeMemoItem(idx)} className="flex items-center justify-center h-full" style={{ color: "#B24A45" }}>
                               <Trash2 size={15} />
                             </button>
                           </div>
                         ))}
                       </div>
-                      <p className="px-2 py-1.5" style={{ fontSize: 12, color: "#8A7A5C", background: "#F3ECDD" }}>
+                      <p className="px-2 py-1.5" style={{ fontSize: 12, color: "#6B7390", background: "#F5F6FA" }}>
                         মোট = হাইট × ওয়েট × পরিমান × দাম
                       </p>
                     </div>
                     <button
                       onClick={addMemoItem}
-                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 mb-4 rounded-sm active:opacity-70"
-                      style={{ background: "#F3ECDD", color: "#8C2F26", fontSize: 14, border: "1px dashed #D9CBA8" }}
+                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 mb-4 rounded-xl active:opacity-70"
+                      style={{ background: "#F5F6FA", color: "#1F2F5C", fontSize: 14, border: "1px dashed #D9DDEB" }}
                     >
                       <Plus size={15} /> আইটেম যোগ করুন
                     </button>
 
                     {/* হিসাব */}
-                    <div className="rounded-sm overflow-hidden mb-2" style={{ border: "1px solid #8C2F26" }}>
+                    <div className="rounded-xl overflow-hidden mb-2" style={{ border: "1px solid #1F2F5C" }}>
                       <SummaryRow label="সাবটোটাল =" value={fmt(calc.subtotal)} />
                       <SummaryRow
                         label="ছাড় (−)"
@@ -2206,7 +2140,7 @@ export default function LedgerApp() {
                             inputMode="decimal"
                             placeholder="0"
                             className="bg-transparent outline-none text-right w-full"
-                            style={{ fontWeight: 700, color: "#8C6A2F" }}
+                            style={{ fontWeight: 700, color: "#C97B2E" }}
                           />
                         }
                       />
@@ -2220,7 +2154,7 @@ export default function LedgerApp() {
                             inputMode="decimal"
                             placeholder="0"
                             className="bg-transparent outline-none text-right w-full"
-                            style={{ fontWeight: 700, color: "#B5473C" }}
+                            style={{ fontWeight: 700, color: "#B24A45" }}
                           />
                         }
                       />
@@ -2234,7 +2168,7 @@ export default function LedgerApp() {
                             inputMode="decimal"
                             placeholder="0"
                             className="bg-transparent outline-none text-right w-full"
-                            style={{ fontWeight: 700, color: "#2A211B" }}
+                            style={{ fontWeight: 700, color: "#1B2340" }}
                           />
                         }
                       />
@@ -2245,10 +2179,10 @@ export default function LedgerApp() {
                       value={memoDraft.note}
                       onChange={(e) => updateMemoField("note", e.target.value)}
                       placeholder="নোট (ঐচ্ছিক)"
-                      className="w-full px-2 py-2 mt-3 rounded-sm outline-none"
+                      className="w-full px-2 py-2 mt-3 rounded-xl outline-none"
                       style={inputStyle}
                     />
-                    <label className="flex items-center gap-2 mt-3" style={{ fontSize: 13, color: "#2A211B" }}>
+                    <label className="flex items-center gap-2 mt-3" style={{ fontSize: 13, color: "#1B2340" }}>
                       <input type="checkbox" checked={memoDraft.listDue} onChange={(e) => updateMemoField("listDue", e.target.checked)} />
                       বাকি থাকলে বাকির লিস্টেও দেখান
                     </label>
@@ -2256,16 +2190,16 @@ export default function LedgerApp() {
                     <div className="py-4 flex gap-2">
                       <button
                         onClick={() => setMemoDraft(null)}
-                        className="px-3 py-2 rounded-sm active:opacity-70"
-                        style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 12 }}
+                        className="px-3 py-2 rounded-xl active:opacity-70"
+                        style={{ border: "1px solid #1F2F5C", color: "#1F2F5C", fontSize: 12 }}
                       >
                         বাতিল
                       </button>
                       <button
                         onClick={handleSaveMemo}
                         disabled={memoSaving}
-                        className="flex-1 py-2 rounded-sm active:opacity-80"
-                        style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 13, fontWeight: 600 }}
+                        className="flex-1 py-2 rounded-xl active:opacity-80"
+                        style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 13, fontWeight: 600 }}
                       >
                         {memoSaving ? "সেভ হচ্ছে…" : "মেমো সেভ করুন"}
                       </button>
@@ -2283,23 +2217,23 @@ export default function LedgerApp() {
                 const used = mm.items.filter(memoItemUsed);
                 return (
                   <div className="px-3 pt-4 pb-10">
-                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #8C2F26", background: "#FFFDF7" }}>
-                      <div className="px-3 py-2 flex items-center justify-between" style={{ background: "#F3ECDD" }}>
-                        <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26" }}>মেমো নং {toBn(mm.no)}</span>
-                        <span style={{ fontSize: 12, color: "#6B5D4A" }}>
+                    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1F2F5C", background: "#FFFFFF" }}>
+                      <div className="px-3 py-2 flex items-center justify-between" style={{ background: "#F5F6FA" }}>
+                        <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C" }}>মেমো নং {toBn(mm.no)}</span>
+                        <span style={{ fontSize: 12, color: "#6B7390" }}>
                           {toBn(mm.d)} {MONTH_NAMES[mm.m - 1]}, {toBn(mm.y)}
                         </span>
                       </div>
-                      <div className="px-3 py-2" style={{ fontSize: 13.5, color: "#2A211B", lineHeight: 1.6 }}>
+                      <div className="px-3 py-2" style={{ fontSize: 13.5, color: "#1B2340", lineHeight: 1.6 }}>
                         <div style={{ fontWeight: 700, fontSize: 15 }}>{mm.customer}</div>
-                        {mm.phone && <div style={{ color: "#6B5D4A" }}>ফোন: {mm.phone}</div>}
-                        {mm.address && <div style={{ color: "#6B5D4A" }}>ঠিকানা: {mm.address}</div>}
+                        {mm.phone && <div style={{ color: "#6B7390" }}>ফোন: {mm.phone}</div>}
+                        {mm.address && <div style={{ color: "#6B7390" }}>ঠিকানা: {mm.address}</div>}
                       </div>
                       {used.length > 0 && (
                         <div className="overflow-x-auto">
                           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 380 }}>
                             <thead>
-                              <tr style={{ background: "#8C2F26", color: "#F3ECDD" }}>
+                              <tr style={{ background: "#1F2F5C", color: "#F5F6FA" }}>
                                 <th style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>নাম</th>
                                 <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>হাইট</th>
                                 <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>ওয়েট</th>
@@ -2310,7 +2244,7 @@ export default function LedgerApp() {
                             </thead>
                             <tbody>
                               {used.map((it) => (
-                                <tr key={it.id} style={{ borderTop: "1px solid #EADFC4" }}>
+                                <tr key={it.id} style={{ borderTop: "1px solid #E8EAF2" }}>
                                   <td style={{ padding: "5px 6px" }}>{it.name}</td>
                                   <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.height || "—"}</td>
                                   <td style={{ padding: "5px 6px", textAlign: "right" }}>{it.weight || "—"}</td>
@@ -2323,7 +2257,7 @@ export default function LedgerApp() {
                           </table>
                         </div>
                       )}
-                      <div style={{ borderTop: "1px solid #8C2F26" }}>
+                      <div style={{ borderTop: "1px solid #1F2F5C" }}>
                         {used.length > 0 && <SummaryRow label="সাবটোটাল =" value={fmt(c.subtotal)} />}
                         {c.discount > 0 && <SummaryRow label="ছাড় (−)" value={fmt(c.discount)} />}
                         {c.prevDue > 0 && <SummaryRow label="পূর্বের বাকি (+)" value={fmt(c.prevDue)} />}
@@ -2332,14 +2266,14 @@ export default function LedgerApp() {
                         <SummaryRow label="বাকি =" value={fmt(c.due)} strong />
                       </div>
                       {mm.note && (
-                        <p className="px-3 py-2" style={{ fontSize: 12.5, color: "#6B5D4A", borderTop: "1px solid #EADFC4" }}>
+                        <p className="px-3 py-2" style={{ fontSize: 12.5, color: "#6B7390", borderTop: "1px solid #E8EAF2" }}>
                           নোট: {mm.note}
                         </p>
                       )}
                     </div>
 
                     {mm.dueListId && (
-                      <p className="mt-2" style={{ fontSize: 12, color: "#8C2F26" }}>
+                      <p className="mt-2" style={{ fontSize: 12, color: "#1F2F5C" }}>
                         ✓ এই বাকি বাকির লিস্টে আছে
                       </p>
                     )}
@@ -2347,8 +2281,8 @@ export default function LedgerApp() {
                     <div className="flex gap-2 mt-4">
                       <button
                         onClick={() => printCustomerMemo(mm)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-sm active:opacity-80"
-                        style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 13.5, fontWeight: 600 }}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl active:opacity-80"
+                        style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 13.5, fontWeight: 600 }}
                       >
                         <Printer size={15} /> প্রিন্ট / PDF
                       </button>
@@ -2356,15 +2290,15 @@ export default function LedgerApp() {
                         <>
                           <button
                             onClick={() => startEditMemo(mm)}
-                            className="flex items-center justify-center gap-1 px-3 py-2.5 rounded-sm active:opacity-70"
-                            style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 13 }}
+                            className="flex items-center justify-center gap-1 px-3 py-2.5 rounded-xl active:opacity-70"
+                            style={{ border: "1px solid #1F2F5C", color: "#1F2F5C", fontSize: 13 }}
                           >
                             <Pencil size={14} /> এডিট
                           </button>
                           <button
                             onClick={() => handleDeleteMemo(mm)}
-                            className="flex items-center justify-center px-3 py-2.5 rounded-sm active:opacity-70"
-                            style={{ border: "1px solid #B5473C", color: "#B5473C" }}
+                            className="flex items-center justify-center px-3 py-2.5 rounded-xl active:opacity-70"
+                            style={{ border: "1px solid #B24A45", color: "#B24A45" }}
                             aria-label="মেমো মুছুন"
                           >
                             <Trash2 size={15} />
@@ -2382,13 +2316,13 @@ export default function LedgerApp() {
                 {editMode ? (
                   <button
                     onClick={startNewMemo}
-                    className="w-full flex items-center justify-center gap-1.5 py-3 mb-3 rounded-sm active:opacity-80"
-                    style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 14, fontWeight: 600 }}
+                    className="w-full flex items-center justify-center gap-1.5 py-3 mb-3 rounded-xl active:opacity-80"
+                    style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 14, fontWeight: 600 }}
                   >
                     <Plus size={16} /> নতুন মেমো বানান
                   </button>
                 ) : (
-                  <div className="mb-3 px-3 py-2 rounded-sm flex items-center gap-2" style={{ background: "#EFE3C8", color: "#7A2820", fontSize: 12 }}>
+                  <div className="mb-3 px-3 py-2 rounded-xl flex items-center gap-2" style={{ background: "#E8EBF5", color: "#1F2F5C", fontSize: 12 }}>
                     <Eye size={13} /> ভিউ মোড — নতুন মেমো বানাতে উপরে বাটনে চাপ দিয়ে এডিট মোড চালু করুন
                   </div>
                 )}
@@ -2396,11 +2330,11 @@ export default function LedgerApp() {
                   value={memoQuery}
                   onChange={(e) => setMemoQuery(e.target.value)}
                   placeholder="কাস্টমারের নাম / ফোন / মেমো নং দিয়ে খুঁজুন…"
-                  className="w-full px-3 py-2 rounded-sm outline-none mb-3"
-                  style={{ border: "1px solid #D9CBA8", background: "#FFFDF7", fontSize: 13.5 }}
+                  className="w-full px-3 py-2 rounded-xl outline-none mb-3"
+                  style={{ border: "1px solid #D9DDEB", background: "#FFFFFF", fontSize: 13.5 }}
                 />
                 {memosLoading ? (
-                  <p style={{ fontSize: 12, color: "#8A7A5C" }}>লোড হচ্ছে…</p>
+                  <p style={{ fontSize: 12, color: "#6B7390" }}>লোড হচ্ছে…</p>
                 ) : (
                   (() => {
                     const q = memoQuery.trim().toLowerCase();
@@ -2411,7 +2345,7 @@ export default function LedgerApp() {
                       : memos;
                     if (list.length === 0)
                       return (
-                        <p style={{ fontSize: 12, color: "#8A7A5C" }}>
+                        <p style={{ fontSize: 12, color: "#6B7390" }}>
                           {memos.length === 0 ? "এখনও কোনো মেমো নেই।" : "কোনো মেমো পাওয়া যায়নি।"}
                         </p>
                       );
@@ -2423,20 +2357,20 @@ export default function LedgerApp() {
                             <button
                               key={mm.id}
                               onClick={() => setMemoView(mm)}
-                              className="w-full text-left rounded-sm px-3 py-2.5 active:opacity-80"
-                              style={{ border: "1px solid #D9CBA8", background: "#FFFDF7" }}
+                              className="w-full text-left rounded-xl px-3 py-2.5 active:opacity-80"
+                              style={{ border: "1px solid #D9DDEB", background: "#FFFFFF" }}
                             >
                               <div className="flex items-center justify-between">
-                                <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#2A211B" }}>{mm.customer}</span>
-                                <span style={{ fontSize: 15, fontWeight: 700, color: "#8C2F26" }}>{fmt(c.total)}</span>
+                                <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 15, color: "#1B2340" }}>{mm.customer}</span>
+                                <span style={{ fontSize: 15, fontWeight: 700, color: "#1F2F5C" }}>{fmt(c.total)}</span>
                               </div>
-                              <div className="flex items-center justify-between mt-1" style={{ fontSize: 11, color: "#8A7A5C" }}>
+                              <div className="flex items-center justify-between mt-1" style={{ fontSize: 11, color: "#6B7390" }}>
                                 <span>
                                   নং {toBn(mm.no)} · {toBn(mm.d)} {MONTH_NAMES[mm.m - 1].slice(0, 3)} {toBn(mm.y)}
                                   {mm.phone ? ` · ${mm.phone}` : ""}
                                 </span>
                                 {c.due > 0 ? (
-                                  <span style={{ color: "#B5473C", fontWeight: 600 }}>বাকি {fmt(c.due)}</span>
+                                  <span style={{ color: "#B24A45", fontWeight: 600 }}>বাকি {fmt(c.due)}</span>
                                 ) : (
                                   <span>পরিশোধিত</span>
                                 )}
@@ -2462,22 +2396,22 @@ export default function LedgerApp() {
                 value={ledgerQuery}
                 onChange={(e) => setLedgerQuery(e.target.value)}
                 placeholder="নাম দিয়ে খুঁজুন…"
-                className="w-full px-3 py-2 rounded-sm outline-none mb-3"
-                style={{ border: "1px solid #D9CBA8", background: "#FFFDF7", fontSize: 13.5 }}
+                className="w-full px-3 py-2 rounded-xl outline-none mb-3"
+                style={{ border: "1px solid #D9DDEB", background: "#FFFFFF", fontSize: 13.5 }}
               />
 
               {ledgerLoading ? (
-                <p style={{ fontSize: 12, color: "#8A7A5C" }}>লোড হচ্ছে…</p>
+                <p style={{ fontSize: 12, color: "#6B7390" }}>লোড হচ্ছে…</p>
               ) : ledgerQuery.trim() ? (
                 (() => {
                   const q = ledgerQuery.trim().toLowerCase();
                   const matches = ledgerData
                     .filter((r) => r.name.toLowerCase().includes(q))
                     .sort((a, b) => b.y - a.y || b.m - a.m || b.d - a.d);
-                  if (matches.length === 0) return <p style={{ fontSize: 12, color: "#8A7A5C" }}>কোনো এন্ট্রি পাওয়া যায়নি।</p>;
+                  if (matches.length === 0) return <p style={{ fontSize: 12, color: "#6B7390" }}>কোনো এন্ট্রি পাওয়া যায়নি।</p>;
                   return (
-                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #8C2F26" }}>
-                      <div className="grid grid-cols-[70px,1fr,54px,70px]" style={{ background: "#8C2F26" }}>
+                    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1F2F5C" }}>
+                      <div className="grid grid-cols-[70px,1fr,54px,70px]" style={{ background: "#1F2F5C" }}>
                         <Th small>তারিখ</Th>
                         <Th>নাম</Th>
                         <Th small>ধরন</Th>
@@ -2487,18 +2421,18 @@ export default function LedgerApp() {
                         <div
                           key={i}
                           className="grid grid-cols-[70px,1fr,54px,70px] items-center"
-                          style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7" }}
+                          style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF" }}
                         >
-                          <div className="px-2 py-1.5" style={{ fontSize: 11, color: "#6B5D4A" }}>
+                          <div className="px-2 py-1.5" style={{ fontSize: 11, color: "#6B7390" }}>
                             {toBn(r.d)} {MONTH_NAMES[r.m - 1].slice(0, 3)} {toBn(r.y)}
                           </div>
-                          <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#2A211B" }}>
+                          <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#1B2340" }}>
                             {r.name}
                           </div>
-                          <div className="px-2 py-1.5" style={{ fontSize: 11, color: r.type === "খরচ" ? "#B98B3E" : "#8C2F26" }}>
+                          <div className="px-2 py-1.5" style={{ fontSize: 11, color: r.type === "খরচ" ? "#C97B2E" : "#1F2F5C" }}>
                             {r.type}
                           </div>
-                          <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#2A211B" }}>
+                          <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#1B2340" }}>
                             {fmt(r.amount)}
                           </div>
                         </div>
@@ -2522,20 +2456,20 @@ export default function LedgerApp() {
                       if (!g.last || val > g.last.val) g.last = { val, y: r.y, m: r.m, d: r.d };
                     });
                   const list = Object.values(grouped).sort((a, b) => b.total - a.total);
-                  if (list.length === 0) return <p style={{ fontSize: 12, color: "#8A7A5C" }}>এখনও কোনো বিক্রি নেই।</p>;
+                  if (list.length === 0) return <p style={{ fontSize: 12, color: "#6B7390" }}>এখনও কোনো বিক্রি নেই।</p>;
                   return (
                     <div className="flex flex-col gap-2">
                       {list.map((g, i) => (
-                        <div key={i} className="rounded-sm px-3 py-2.5" style={{ border: "1px solid #D9CBA8", background: "#FFFDF7" }}>
+                        <div key={i} className="rounded-xl px-3 py-2.5" style={{ border: "1px solid #D9DDEB", background: "#FFFFFF" }}>
                           <div className="flex items-center justify-between">
-                            <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#2A211B" }}>{g.name}</span>
-                            <span style={{ fontSize: 15, fontWeight: 700, color: "#8C2F26" }}>{fmt(g.total)}</span>
+                            <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 15, color: "#1B2340" }}>{g.name}</span>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: "#1F2F5C" }}>{fmt(g.total)}</span>
                           </div>
-                          <div className="flex items-center justify-between mt-1" style={{ fontSize: 11, color: "#8A7A5C" }}>
+                          <div className="flex items-center justify-between mt-1" style={{ fontSize: 11, color: "#6B7390" }}>
                             <span>
                               {toBn(g.count)} টা এন্ট্রি · সর্বশেষ {toBn(g.last.d)} {MONTH_NAMES[g.last.m - 1].slice(0, 3)} {toBn(g.last.y)}
                             </span>
-                            {g.due > 0 && <span style={{ color: "#B5473C", fontWeight: 600 }}>বাকি {fmt(g.due)}</span>}
+                            {g.due > 0 && <span style={{ color: "#B24A45", fontWeight: 600 }}>বাকি {fmt(g.due)}</span>}
                           </div>
                         </div>
                       ))}
@@ -2556,9 +2490,9 @@ export default function LedgerApp() {
               <div className="lg:w-full lg:max-w-md">
                 <SectionTitle label="বছরের সারাংশ" />
                 {yearStatsLoading ? (
-                  <p style={{ fontSize: 12, color: "#8A7A5C" }}>লোড হচ্ছে…</p>
+                  <p style={{ fontSize: 12, color: "#6B7390" }}>লোড হচ্ছে…</p>
                 ) : (
-                  <div className="rounded-sm overflow-hidden mb-2 lg:scale-110 lg:origin-top-right" style={{ border: "1px solid #8C2F26" }}>
+                  <div className="rounded-xl overflow-hidden mb-2 lg:scale-110 lg:origin-top-right" style={{ border: "1px solid #1F2F5C" }}>
                     <SummaryRow label="মোট আয় =" value={fmt(yearStats.income)} />
                     <SummaryRow label="মোট খরচ = (-)" value={fmt(yearStats.expense)} negative />
                     <SummaryRow label="থাকলো =" value={fmt(yearStats.income - yearStats.expense)} strong />
@@ -2568,7 +2502,7 @@ export default function LedgerApp() {
             </div>
 
             <div className="px-4 pt-4 pb-1">
-              <p style={{ color: "#6B5D4A", fontSize: 13 }}>মাস বেছে নিন</p>
+              <p style={{ color: "#6B7390", fontSize: 13 }}>মাস বেছে নিন</p>
             </div>
             <div className="flex flex-col">
               {MONTH_NAMES.map((name, i) => (
@@ -2601,8 +2535,8 @@ export default function LedgerApp() {
               <button
                 onClick={() => printMonthReport(year, month, monthEntries)}
                 disabled={monthLoading}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-sm active:opacity-70"
-                style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 12.5, fontWeight: 600 }}
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl active:opacity-70"
+                style={{ border: "1px solid #1F2F5C", color: "#1F2F5C", fontSize: 12.5, fontWeight: 600 }}
               >
                 <Printer size={14} /> PDF রিপোর্ট
               </button>
@@ -2610,8 +2544,8 @@ export default function LedgerApp() {
 
             {!editMode && (
               <div
-                className="mx-3 mt-3 px-3 py-2 rounded-sm flex items-center gap-2"
-                style={{ background: "#EFE3C8", color: "#7A2820", fontSize: 12 }}
+                className="mx-3 mt-3 px-3 py-2 rounded-xl flex items-center gap-2"
+                style={{ background: "#E8EBF5", color: "#1F2F5C", fontSize: 12 }}
               >
                 <Eye size={13} /> ভিউ মোড — শুধু দেখা যাচ্ছে, এডিট করতে উপরে বাটনে চাপুন
               </div>
@@ -2619,14 +2553,14 @@ export default function LedgerApp() {
 
             <div className="px-3 pt-3" style={editMode ? undefined : { pointerEvents: "none", opacity: 0.8 }}>
               {/* ---- ড্রাফট প্যানেল: নতুন এন্ট্রি বা ক্লিক করে আনা এন্ট্রি এডিট ---- */}
-              <div className="rounded-sm mb-5" style={{ border: "1px solid #8C2F26", background: "#F3ECDD" }}>
+              <div className="rounded-xl mb-5" style={{ border: "2.5px solid #1F2F5C", background: "#F5F6FA" }}>
                 <div className="flex items-center justify-center gap-2 px-3 pt-3 pb-2">
-                  <span style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26" }}>তারিখ</span>
+                  <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C" }}>তারিখ</span>
                   <select
                     value={draftDay}
                     onChange={(e) => setDraftDay(Number(e.target.value))}
-                    className="rounded-sm"
-                    style={{ fontSize: 13, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "4px 5px" }}
+                    className="rounded-xl"
+                    style={{ fontSize: 14, fontWeight: 800, color: "#1F2F5C", background: "#FFFFFF", border: "2px solid #1F2F5C", padding: "4px 5px" }}
                   >
                     {Array.from({ length: daysInMonth(draftYear, draftMonth) }, (_, i) => i + 1).map((d) => (
                       <option key={d} value={d}>
@@ -2637,8 +2571,8 @@ export default function LedgerApp() {
                   <select
                     value={draftMonth}
                     onChange={(e) => setDraftMonth(Number(e.target.value))}
-                    className="rounded-sm"
-                    style={{ fontSize: 13, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "4px 5px" }}
+                    className="rounded-xl"
+                    style={{ fontSize: 14, fontWeight: 800, color: "#1F2F5C", background: "#FFFFFF", border: "2px solid #1F2F5C", padding: "4px 5px" }}
                   >
                     {MONTH_NAMES.map((mn, i) => (
                       <option key={mn} value={i + 1}>
@@ -2649,8 +2583,8 @@ export default function LedgerApp() {
                   <select
                     value={draftYear}
                     onChange={(e) => setDraftYear(Number(e.target.value))}
-                    className="rounded-sm"
-                    style={{ fontSize: 13, background: "#FFFDF7", border: "1px solid #D9CBA8", padding: "4px 5px" }}
+                    className="rounded-xl"
+                    style={{ fontSize: 14, fontWeight: 800, color: "#1F2F5C", background: "#FFFFFF", border: "2px solid #1F2F5C", padding: "4px 5px" }}
                   >
                     {YEARS.map((y) => (
                       <option key={y} value={y}>
@@ -2663,7 +2597,7 @@ export default function LedgerApp() {
                 <div className="flex flex-col lg:flex-row">
                   {/* --- বিক্রি ড্রাফট (৭০%, একাধিক সারি) --- */}
                   <div className="px-3 lg:w-[70%]">
-                    <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26", margin: "4px 0" }}>বিক্রি</p>
+                    <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C", margin: "4px 0" }}>বিক্রি</p>
                     <NameDropdown
                       label="বিক্রির নাম বেছে নিন"
                       names={allSaleNames}
@@ -2672,11 +2606,11 @@ export default function LedgerApp() {
                       onAdd={() => addPresetName("sale")}
                       onRemove={(n) => removePresetName("sale", n)}
                     />
-                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
+                    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #D9DDEB" }}>
                       <div className="overflow-x-auto">
                         <div
                           className="grid items-center"
-                          style={{ gridTemplateColumns: "120px 48px 48px 56px 48px 56px 48px 48px 24px", background: "#B98B3E", minWidth: 480 }}
+                          style={{ gridTemplateColumns: "120px 48px 48px 56px 48px 56px 48px 48px 24px", background: "#C97B2E", minWidth: 480 }}
                         >
                           <Th>নাম</Th>
                           <Th right>হাইট</Th>
@@ -2694,9 +2628,9 @@ export default function LedgerApp() {
                             className="grid items-center"
                             style={{
                               gridTemplateColumns: "120px 48px 48px 56px 48px 56px 48px 48px 24px",
-                              background: "#FFFDF7",
+                              background: "#FFFFFF",
                               minWidth: 480,
-                              borderTop: idx > 0 ? "1px solid #EADFC4" : "none",
+                              borderTop: idx > 0 ? "1px solid #E8EAF2" : "none",
                             }}
                           >
                             <input
@@ -2705,7 +2639,7 @@ export default function LedgerApp() {
                               list="sale-name-options"
                               placeholder="নাম"
                               className="min-w-0 px-1.5 py-2 bg-transparent outline-none"
-                              style={{ fontSize: 14, color: "#2A211B" }}
+                              style={{ fontSize: 14, color: "#1B2340" }}
                             />
                             <input
                               value={row.height}
@@ -2713,7 +2647,7 @@ export default function LedgerApp() {
                               inputMode="decimal"
                               placeholder="—"
                               className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
-                              style={{ fontSize: 14, color: "#2A211B" }}
+                              style={{ fontSize: 14, color: "#1B2340" }}
                             />
                             <input
                               value={row.weight}
@@ -2721,7 +2655,7 @@ export default function LedgerApp() {
                               inputMode="decimal"
                               placeholder="—"
                               className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
-                              style={{ fontSize: 14, color: "#2A211B" }}
+                              style={{ fontSize: 14, color: "#1B2340" }}
                             />
                             <input
                               value={row.qty}
@@ -2729,7 +2663,7 @@ export default function LedgerApp() {
                               inputMode="decimal"
                               placeholder="1"
                               className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
-                              style={{ fontSize: 14, color: "#2A211B" }}
+                              style={{ fontSize: 14, color: "#1B2340" }}
                             />
                             <input
                               value={row.price}
@@ -2737,9 +2671,9 @@ export default function LedgerApp() {
                               inputMode="decimal"
                               placeholder="0"
                               className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
-                              style={{ fontSize: 14, color: "#2A211B" }}
+                              style={{ fontSize: 14, color: "#1B2340" }}
                             />
-                            <div className="px-1 py-2 text-right truncate" style={{ fontSize: 14, color: "#5B3E1B", fontWeight: 700 }}>
+                            <div className="px-1 py-2 text-right truncate" style={{ fontSize: 14, color: "#1F2F5C", fontWeight: 700 }}>
                               {fmt(netTotal(row))}
                             </div>
                             <input
@@ -2748,7 +2682,7 @@ export default function LedgerApp() {
                               inputMode="decimal"
                               placeholder="0"
                               className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
-                              style={{ fontSize: 14, color: "#B5473C", fontWeight: 600 }}
+                              style={{ fontSize: 14, color: "#B24A45", fontWeight: 600 }}
                             />
                             <input
                               value={row.discount}
@@ -2756,26 +2690,26 @@ export default function LedgerApp() {
                               inputMode="decimal"
                               placeholder="0"
                               className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right"
-                              style={{ fontSize: 14, color: "#8C6A2F", fontWeight: 600 }}
+                              style={{ fontSize: 14, color: "#C97B2E", fontWeight: 600 }}
                             />
                             <button
                               onClick={() => removeSaleDraftRow(idx)}
                               className="flex items-center justify-center h-full"
-                              style={{ color: "#B5473C" }}
+                              style={{ color: "#B24A45" }}
                             >
                               <Trash2 size={15} />
                             </button>
                           </div>
                         ))}
                       </div>
-                      <p className="px-2 py-1.5" style={{ fontSize: 12, color: "#8A7A5C", background: "#F3ECDD" }}>
+                      <p className="px-2 py-1.5" style={{ fontSize: 12, color: "#6B7390", background: "#F5F6FA" }}>
                         মোট = (হাইট × ওয়েট × পরিমান × দাম) − বাকি − ছাড়।
                       </p>
                     </div>
                     <button
                       onClick={() => setSaleDrafts((rows) => [...rows, emptySaleDraft()])}
-                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-sm active:opacity-70"
-                      style={{ background: "#F3ECDD", color: "#8C2F26", fontSize: 14, border: "1px dashed #D9CBA8" }}
+                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-xl active:opacity-70"
+                      style={{ background: "#F5F6FA", color: "#1F2F5C", fontSize: 14, border: "1px dashed #D9DDEB" }}
                     >
                       <Plus size={15} /> বিক্রি যোগ করুন
                     </button>
@@ -2783,7 +2717,7 @@ export default function LedgerApp() {
 
                   {/* --- খরচ ড্রাফট (৩০%, একাধিক সারি) --- */}
                   <div className="px-3 mt-3 lg:mt-0 lg:w-[30%]">
-                    <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 16, color: "#8C2F26", margin: "4px 0" }}>খরচ</p>
+                    <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C", margin: "4px 0" }}>খরচ</p>
                     <NameDropdown
                       label="খরচের নাম বেছে নিন"
                       names={allExpenseNames}
@@ -2792,8 +2726,8 @@ export default function LedgerApp() {
                       onAdd={() => addPresetName("expense")}
                       onRemove={(n) => removePresetName("expense", n)}
                     />
-                    <div className="rounded-sm overflow-hidden" style={{ border: "1px solid #D9CBA8" }}>
-                      <div className="grid" style={{ gridTemplateColumns: "1fr 70px 24px", background: "#8C2F26" }}>
+                    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #D9DDEB" }}>
+                      <div className="grid" style={{ gridTemplateColumns: "1fr 70px 24px", background: "#1F2F5C" }}>
                         <Th>বিবরণ</Th>
                         <Th right>টাকা</Th>
                         <Th />
@@ -2802,7 +2736,7 @@ export default function LedgerApp() {
                         <div
                           key={idx}
                           className="grid items-center"
-                          style={{ gridTemplateColumns: "1fr 70px 24px", background: "#FFFDF7", borderTop: idx > 0 ? "1px solid #EADFC4" : "none" }}
+                          style={{ gridTemplateColumns: "1fr 70px 24px", background: "#FFFFFF", borderTop: idx > 0 ? "1px solid #E8EAF2" : "none" }}
                         >
                           <input
                             value={row.name}
@@ -2810,7 +2744,7 @@ export default function LedgerApp() {
                             list="expense-name-options"
                             placeholder="যেমন: নাস্তা"
                             className="min-w-0 px-2 py-2 bg-transparent outline-none"
-                            style={{ fontSize: 15, color: "#2A211B" }}
+                            style={{ fontSize: 15, color: "#1B2340" }}
                           />
                           <input
                             value={row.amount}
@@ -2818,9 +2752,9 @@ export default function LedgerApp() {
                             inputMode="decimal"
                             placeholder="0"
                             className="min-w-0 w-full px-1 py-2 bg-transparent outline-none text-right"
-                            style={{ fontSize: 15, color: "#2A211B" }}
+                            style={{ fontSize: 15, color: "#1B2340" }}
                           />
-                          <button onClick={() => removeExpenseDraftRow(idx)} className="flex items-center justify-center h-full" style={{ color: "#B5473C" }}>
+                          <button onClick={() => removeExpenseDraftRow(idx)} className="flex items-center justify-center h-full" style={{ color: "#B24A45" }}>
                             <Trash2 size={15} />
                           </button>
                         </div>
@@ -2828,8 +2762,8 @@ export default function LedgerApp() {
                     </div>
                     <button
                       onClick={() => setExpenseDrafts((rows) => [...rows, emptyExpenseDraft()])}
-                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-sm active:opacity-70"
-                      style={{ background: "#F3ECDD", color: "#8C2F26", fontSize: 14, border: "1px dashed #D9CBA8" }}
+                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-xl active:opacity-70"
+                      style={{ background: "#F5F6FA", color: "#1F2F5C", fontSize: 14, border: "1px dashed #D9DDEB" }}
                     >
                       <Plus size={15} /> খরচ যোগ করুন
                     </button>
@@ -2839,16 +2773,16 @@ export default function LedgerApp() {
                 <div className="px-3 py-3 flex gap-2">
                   <button
                     onClick={() => resetDraft(draftYear, draftMonth)}
-                    className="px-3 py-2 rounded-sm active:opacity-70"
-                    style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 12 }}
+                    className="px-3 py-2 rounded-xl active:opacity-70"
+                    style={{ border: "1px solid #1F2F5C", color: "#1F2F5C", fontSize: 12 }}
                   >
                     বাতিল
                   </button>
                   <button
                     onClick={handleSaveDraft}
                     disabled={saving}
-                    className="flex-1 py-2 rounded-sm active:opacity-80"
-                    style={{ background: "#8C2F26", color: "#F3ECDD", fontSize: 13, fontWeight: 600 }}
+                    className="flex-1 py-2 rounded-xl active:opacity-80"
+                    style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 13, fontWeight: 600 }}
                   >
                     {saving ? "সেভ হচ্ছে…" : "সেভ করুন"}
                   </button>
@@ -2857,7 +2791,7 @@ export default function LedgerApp() {
 
               {/* ---- প্রতিদিনের বক্স ---- */}
               {monthLoading ? (
-                <div className="flex items-center justify-center py-10" style={{ color: "#8C2F26" }}>
+                <div className="flex items-center justify-center py-10" style={{ color: "#1F2F5C" }}>
                   লোড হচ্ছে…
                 </div>
               ) : (
@@ -2866,36 +2800,27 @@ export default function LedgerApp() {
                     const dayData = monthEntries[d];
                     const hasEntries = dayData && (dayData.expenses.length > 0 || dayData.items.length > 0);
                     return (
-                      <div key={d} className="rounded-sm mb-3" style={{ border: "1px solid #D9CBA8" }}>
+                      <div key={d} className="rounded-xl mb-3 overflow-hidden" style={{ border: "2.5px solid #1F2F5C" }}>
                         <div
                           className="px-3 py-2 flex items-center justify-between"
-                          style={{ background: "#F3ECDD" }}
+                          style={{ background: "#F5F6FA" }}
                         >
-                          <p style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 15, color: "#8C2F26", margin: 0 }}>
-                            {toBn(d)} {MONTH_NAMES[month - 1]}, {toBn(year)} <span style={{ fontSize: 12, color: "#8A7A5C" }}>({getWeekday(year, month, d)})</span>
+                          <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 17, fontWeight: 800, color: "#1F2F5C", margin: 0 }}>
+                            {toBn(d)} {MONTH_NAMES[month - 1]}, {toBn(year)} <span style={{ fontSize: 13, fontWeight: 700, color: "#1F2F5C" }}>({getWeekday(year, month, d)})</span>
                           </p>
-                          {hasEntries && (
-                            <button
-                              onClick={() => printDayMemo(year, month, d, dayData)}
-                              className="flex items-center gap-1 px-2 py-1 rounded-sm active:opacity-70"
-                              style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 10.5 }}
-                            >
-                              <Printer size={12} /> মেমো
-                            </button>
-                          )}
                         </div>
                         {!hasEntries ? (
-                          <p className="px-3 py-2" style={{ fontSize: 11, color: "#8A7A5C", margin: 0 }}>
+                          <p className="px-3 py-2" style={{ fontSize: 11, color: "#6B7390", margin: 0 }}>
                             কোনো এন্ট্রি নেই
                           </p>
                         ) : (
                           <>
                           <div className="flex flex-col lg:flex-row">
                             {/* ---- বিক্রি (৭০%) ---- */}
-                            <div className="lg:w-[70%] overflow-x-auto" style={{ borderRight: "1px solid #D9CBA8" }}>
+                            <div className="lg:w-[70%] overflow-x-auto" style={{ borderRight: "2.5px solid #1F2F5C" }}>
                               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 420 }}>
                                 <thead>
-                                  <tr style={{ background: "#8C2F26", color: "#F3ECDD" }}>
+                                  <tr style={{ background: "#1F2F5C", color: "#F5F6FA" }}>
                                     <th style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>নাম</th>
                                     <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>হাইট</th>
                                     <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>ওয়েট</th>
@@ -2910,7 +2835,7 @@ export default function LedgerApp() {
                                 <tbody>
                                   {dayData.items.length === 0 ? (
                                     <tr>
-                                      <td colSpan={9} style={{ padding: "6px", fontSize: 12, color: "#8A7A5C", background: "#FFFDF7" }}>
+                                      <td colSpan={9} style={{ padding: "6px", fontSize: 12, color: "#6B7390", background: "#FFFFFF" }}>
                                         কোনো বিক্রি নেই
                                       </td>
                                     </tr>
@@ -2919,7 +2844,7 @@ export default function LedgerApp() {
                                       <tr
                                         key={row.id}
                                         onClick={() => loadClickedSale(year, month, d, row)}
-                                        style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
+                                        style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: "pointer" }}
                                       >
                                         <td style={{ padding: "5px 6px" }}>{row.name}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.height || "—"}</td>
@@ -2927,20 +2852,20 @@ export default function LedgerApp() {
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.qty || "১"}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.price || 0}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>{fmt(netTotal(row))}</td>
-                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#B5473C" }}>
+                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#B24A45" }}>
                                           {row.due || 0}
                                           {num(row.duePaid) > 0 && (
-                                            <div style={{ fontSize: 9.5, color: "#5B7F3E" }}>শোধ {fmt(num(row.duePaid))}</div>
+                                            <div style={{ fontSize: 9.5, color: "#3E7D5A" }}>শোধ {fmt(num(row.duePaid))}</div>
                                           )}
                                         </td>
-                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#8C6A2F" }}>{row.discount || 0}</td>
+                                        <td style={{ padding: "5px 6px", textAlign: "right", color: "#C97B2E" }}>{row.discount || 0}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               deleteSaleRow(year, month, d, row.id);
                                             }}
-                                            style={{ color: "#B5473C" }}
+                                            style={{ color: "#B24A45" }}
                                           >
                                             <Trash2 size={13} />
                                           </button>
@@ -2956,7 +2881,7 @@ export default function LedgerApp() {
                             <div className="lg:w-[30%] overflow-x-auto">
                               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 180 }}>
                                 <thead>
-                                  <tr style={{ background: "#B98B3E", color: "#F3ECDD" }}>
+                                  <tr style={{ background: "#C97B2E", color: "#F5F6FA" }}>
                                     <th style={{ padding: "5px 6px", textAlign: "left", fontWeight: 600 }}>খরচ</th>
                                     <th style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600 }}>টাকা</th>
                                     <th style={{ padding: "5px 6px" }}></th>
@@ -2965,7 +2890,7 @@ export default function LedgerApp() {
                                 <tbody>
                                   {dayData.expenses.length === 0 ? (
                                     <tr>
-                                      <td colSpan={3} style={{ padding: "6px", fontSize: 12, color: "#8A7A5C", background: "#FFFDF7" }}>
+                                      <td colSpan={3} style={{ padding: "6px", fontSize: 12, color: "#6B7390", background: "#FFFFFF" }}>
                                         কোনো খরচ নেই
                                       </td>
                                     </tr>
@@ -2974,7 +2899,7 @@ export default function LedgerApp() {
                                       <tr
                                         key={row.id}
                                         onClick={() => loadClickedExpense(year, month, d, row)}
-                                        style={{ borderTop: "1px solid #EADFC4", background: "#FFFDF7", cursor: "pointer" }}
+                                        style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: "pointer" }}
                                       >
                                         <td style={{ padding: "5px 6px" }}>{row.name}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>{fmt(num(row.amount) || 0)}</td>
@@ -2984,7 +2909,7 @@ export default function LedgerApp() {
                                               e.stopPropagation();
                                               deleteExpenseRow(year, month, d, row.id);
                                             }}
-                                            style={{ color: "#B5473C" }}
+                                            style={{ color: "#B24A45" }}
                                           >
                                             <Trash2 size={13} />
                                           </button>
@@ -2999,7 +2924,7 @@ export default function LedgerApp() {
 
                           <div className="overflow-x-auto">
                             <div style={{ minWidth: 560 }}>
-                              <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#B98B3E", color: "#F3ECDD", fontSize: 11 }}>
+                              <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#C97B2E", color: "#F5F6FA", fontSize: 11 }}>
                                 <span style={{ padding: "5px 4px" }}>ইজা টাকা =</span>
                                 <span style={{ padding: "5px 4px" }}>বিক্রি মোট =</span>
                                 <span style={{ padding: "5px 4px" }}>(বাকি)</span>
@@ -3008,14 +2933,14 @@ export default function LedgerApp() {
                                 <span style={{ padding: "5px 4px" }}>মোট খরচ =</span>
                                 <span style={{ padding: "5px 4px" }}>অবশিষ্ট =</span>
                               </div>
-                              <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#FFFDF7", fontSize: 12.5, fontWeight: 700 }}>
+                              <div className="grid" style={{ gridTemplateColumns: "repeat(7,1fr)", background: "#FFFFFF", fontSize: 12.5, fontWeight: 700 }}>
                                 <span style={{ padding: "5px 4px" }}>{fmt(dayData.opening)}</span>
                                 <span style={{ padding: "5px 4px" }}>{fmt(dayData.itemsTotal)}</span>
-                                <span style={{ padding: "5px 4px", color: "#B5473C" }}>{fmt(dayData.duesTotalDay)}</span>
-                                <span style={{ padding: "5px 4px", color: "#8C6A2F" }}>{fmt(dayData.discountTotalDay)}</span>
+                                <span style={{ padding: "5px 4px", color: "#B24A45" }}>{fmt(dayData.duesTotalDay)}</span>
+                                <span style={{ padding: "5px 4px", color: "#C97B2E" }}>{fmt(dayData.discountTotalDay)}</span>
                                 <span style={{ padding: "5px 4px" }}>{fmt(dayData.totalMoney)}</span>
-                                <span style={{ padding: "5px 4px", color: "#B5473C" }}>{fmt(dayData.expenseTotal)}</span>
-                                <span style={{ padding: "5px 4px", fontWeight: 700, color: "#7A2820" }}>{fmt(dayData.remaining)}</span>
+                                <span style={{ padding: "5px 4px", color: "#B24A45" }}>{fmt(dayData.expenseTotal)}</span>
+                                <span style={{ padding: "5px 4px", fontWeight: 700, color: "#1F2F5C" }}>{fmt(dayData.remaining)}</span>
                               </div>
                             </div>
                           </div>
