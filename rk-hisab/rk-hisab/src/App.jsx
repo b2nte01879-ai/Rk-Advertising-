@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu } from "lucide-react";
 import { storage } from "./firebase";
 
 // ---------- constants ----------
@@ -517,8 +517,56 @@ const Tab = ({ index, label, sub, onClick }) => (
   </button>
 );
 
-const HeaderBar = ({ title, onBack, editMode, onToggleMode }) => (
+// ☰ হ্যামবার্গার মেনু — items: [{ label, icon, onClick, disabled }]
+const HamburgerMenu = ({ items }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative -ml-1">
+      <button onClick={() => setOpen((o) => !o)} className="p-1 active:opacity-60" aria-label="মেনু" aria-expanded={open}>
+        <Menu size={22} />
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 mt-3 rounded-sm overflow-hidden"
+          style={{ top: "100%", minWidth: 250, background: "#FFFDF7", border: "1px solid #8C2F26", boxShadow: "0 8px 20px rgba(42,33,27,0.25)", zIndex: 40 }}
+        >
+          {items.map((it, i) => (
+            <button
+              key={it.label}
+              disabled={it.disabled}
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-[#F3ECDD]"
+              style={{ color: "#8C2F26", fontSize: 14, fontWeight: 600, borderTop: i > 0 ? "1px solid #EADFC4" : "none", opacity: it.disabled ? 0.55 : 1 }}
+            >
+              {it.icon}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const HeaderBar = ({ title, onBack, editMode, onToggleMode, menuItems }) => (
   <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{ background: "#7A2820", color: "#F3ECDD" }}>
+    {menuItems && <HamburgerMenu items={menuItems} />}
     {onBack && (
       <button onClick={onBack} className="p-1 -ml-1 active:opacity-60">
         <ChevronLeft size={22} />
@@ -1655,6 +1703,19 @@ export default function LedgerApp() {
               }
               editMode={editMode}
               onToggleMode={toggleEditMode}
+              menuItems={[
+                { label: "কাস্টমার মেমো", icon: <FileText size={17} />, onClick: () => setView("memos") },
+                { label: "গ্রাহক লেজার / এন্ট্রি খুঁজুন", icon: <Search size={17} />, onClick: () => setView("ledger") },
+                {
+                  label: backingUp ? "ব্যাকআপ তৈরি হচ্ছে…" : "ব্যাকআপ ডাউনলোড (CSV)",
+                  icon: <Download size={17} />,
+                  disabled: backingUp,
+                  onClick: () => {
+                    setBackingUp(true);
+                    downloadBackupCsv(() => setBackingUp(false));
+                  },
+                },
+              ]}
             />
 
             <div className="px-3 pt-5 pb-1 lg:flex">
@@ -1675,20 +1736,6 @@ export default function LedgerApp() {
                   </div>
                   <div style={{ fontSize: 10.5, opacity: 0.8 }}>দেখতে ট্যাপ করুন</div>
                 </div>
-              </button>
-            </div>
-
-            <div className="px-3 pt-3 lg:flex">
-              <button
-                onClick={() => setView("memos")}
-                className="w-full flex items-center justify-between px-4 py-4 rounded-sm active:opacity-80 lg:w-auto lg:min-w-[320px] lg:max-w-sm"
-                style={{ background: "#FFFDF7", color: "#8C2F26", border: "1px solid #8C2F26" }}
-              >
-                <div className="text-left">
-                  <div style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 17 }}>কাস্টমার মেমো</div>
-                  <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 2 }}>কাস্টমারকে মেমো দিন, মেমো জমা থাকবে</div>
-                </div>
-                <FileText size={24} />
               </button>
             </div>
 
@@ -1745,30 +1792,6 @@ export default function LedgerApp() {
               </select>
             </div>
 
-            <div className="px-3 pt-4">
-              <button
-                onClick={() => setView("ledger")}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-sm active:opacity-70"
-                style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 13, fontWeight: 600 }}
-              >
-                <Search size={15} /> গ্রাহক লেজার / এন্ট্রি খুঁজুন
-              </button>
-            </div>
-
-            <div className="px-4 pt-6 pb-8">
-              <button
-                onClick={() => {
-                  setBackingUp(true);
-                  downloadBackupCsv(() => setBackingUp(false));
-                }}
-                disabled={backingUp}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-sm active:opacity-70"
-                style={{ border: "1px solid #8C2F26", color: "#8C2F26", fontSize: 13, fontWeight: 600 }}
-              >
-                <Download size={15} />
-                {backingUp ? "তৈরি হচ্ছে…" : "ব্যাকআপ ডাউনলোড করুন (CSV)"}
-              </button>
-            </div>
           </>
         )}
 
