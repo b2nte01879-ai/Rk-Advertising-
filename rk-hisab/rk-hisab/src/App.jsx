@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu, LayoutGrid, TrendingUp, Wallet, Receipt, Clock, BarChart3 } from "lucide-react";
 import { storage } from "./firebase";
 
 // ---------- constants ----------
@@ -517,31 +517,39 @@ const Tab = ({ index, label, sub, onClick }) => (
   </button>
 );
 
-// ☰ হ্যামবার্গার মেনু — items: [{ label, icon, onClick, disabled }]
-const HamburgerMenu = ({ items }) => {
+// মেনু বাটন — items: [{ label, icon, onClick, disabled }]
+const HamburgerMenu = ({ items, icon, buttonStyle, buttonClass, align = "left", accent = "#8C2F26" }) => {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("touchstart", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("touchstart", close);
-    };
-  }, [open]);
   return (
-    <div ref={ref} className="relative -ml-1">
-      <button onClick={() => setOpen((o) => !o)} className="p-1 active:opacity-60" aria-label="মেনু" aria-expanded={open}>
-        <Menu size={22} />
+    <div className={align === "right" ? "relative" : "relative -ml-1"}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={buttonClass || "p-1 active:opacity-60"}
+        style={buttonStyle}
+        aria-label="মেনু"
+        aria-expanded={open}
+      >
+        {icon || <Menu size={22} />}
       </button>
       {open && (
         <div
-          className="absolute left-0 mt-3 rounded-sm overflow-hidden"
-          style={{ top: "100%", minWidth: 250, background: "#FFFDF7", border: "1px solid #8C2F26", boxShadow: "0 8px 20px rgba(42,33,27,0.25)", zIndex: 40 }}
+          onClick={() => setOpen(false)}
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 30 }}
+        />
+      )}
+      {open && (
+        <div
+          className="absolute rounded-xl overflow-hidden"
+          style={{
+            top: "100%",
+            marginTop: 10,
+            [align === "right" ? "right" : "left"]: 0,
+            minWidth: 255,
+            background: "#FFFFFF",
+            border: `1px solid ${accent}`,
+            boxShadow: "0 10px 26px rgba(31,47,92,0.22)",
+            zIndex: 40,
+          }}
         >
           {items.map((it, i) => (
             <button
@@ -551,8 +559,8 @@ const HamburgerMenu = ({ items }) => {
                 setOpen(false);
                 it.onClick();
               }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-[#F3ECDD]"
-              style={{ color: "#8C2F26", fontSize: 14, fontWeight: 600, borderTop: i > 0 ? "1px solid #EADFC4" : "none", opacity: it.disabled ? 0.55 : 1 }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-[#F5F6FA]"
+              style={{ color: accent, fontSize: 14, fontWeight: 600, borderTop: i > 0 ? "1px solid #E8EAF2" : "none", opacity: it.disabled ? 0.55 : 1 }}
             >
               {it.icon}
               {it.label}
@@ -1689,111 +1697,138 @@ export default function LedgerApp() {
         className="rk-zoom min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto lg:max-w-6xl lg:h-screen lg:my-0 lg:rounded-none lg:shadow-none"
         style={{ background: "#F3ECDD", fontFamily: "'Noto Sans Bengali', sans-serif" }}
       >
-        {/* ---------- YEARS ---------- */}
-        {view === "years" && (
-          <>
-            <HeaderBar
-              title={
-                <div className="leading-tight">
-                  <div className="rk-brand-title" style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.3, opacity: 0.9 }}>
-                    R.K ADVERTISING AND DIGITAL HOUSE
+        {/* ---------- YEARS (ড্যাশবোর্ড) ---------- */}
+        {view === "years" &&
+          (() => {
+            const NAVY = "#1F2F5C";
+            const GRAY = "#6B7390";
+            const s = todaySummary;
+            const sale = s
+              ? s.items
+                  .filter((it) => !String(it.name || "").endsWith("(পরিশোধ)"))
+                  .reduce((a, it) => a + grossTotal(it) - numOr0(it.discount), 0)
+              : 0;
+            const paid = s ? s.itemsTotal : 0;
+            const expense = s ? s.expenseTotal : 0;
+            const dueToday = s ? s.items.reduce((a, it) => a + dueRemaining(it), 0) : 0;
+            const profit = sale - expense;
+            const money = (n) => `${n < 0 ? "−" : ""}৳ ${toBn(fmt(Math.abs(n)))}`;
+            const val = (n) => (todayLoading && !s ? "…" : money(n));
+            const card = { background: "#FFFFFF", borderRadius: 22 };
+            const stats = [
+              { label: "মোট জমা", value: paid, color: "#3E7D5A", icon: <Wallet size={28} strokeWidth={1.8} /> },
+              { label: "মোট খরচ", value: expense, color: "#C97B2E", icon: <Receipt size={28} strokeWidth={1.8} /> },
+              { label: "বাকি টাকা", value: dueToday, color: "#B24A45", icon: <Clock size={28} strokeWidth={1.8} /> },
+              { label: "আনুমানিক লাভ", value: profit, color: "#4262B4", icon: <BarChart3 size={28} strokeWidth={1.8} /> },
+            ];
+            const goToday = () => {
+              const now = new Date();
+              if (!YEARS.includes(now.getFullYear())) return;
+              setYear(now.getFullYear());
+              setMonth(now.getMonth() + 1);
+              setView("days");
+            };
+            return (
+              <div className="flex-1 px-4 pt-6 pb-10" style={{ background: "#F5F6FA" }}>
+                {/* হেডার */}
+                <div className="flex items-start justify-between mb-5">
+                  <div className="min-w-0">
+                    <h1 style={{ color: NAVY, fontSize: 28, fontWeight: 700, lineHeight: 1.15 }}>RK Advertising</h1>
+                    <p style={{ color: GRAY, fontSize: 17, marginTop: 4 }}>দৈনিক হিসাব ব্যবস্থাপনা</p>
                   </div>
-                  <div style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 18 }}>দৈনিক হিসাব</div>
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    <button
+                      onClick={toggleEditMode}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-full active:opacity-70"
+                      style={{ background: "#FFFFFF", color: NAVY, fontSize: 11.5, fontWeight: 600, border: "1px solid #D9DDEB" }}
+                    >
+                      {editMode ? <Pencil size={12} /> : <Eye size={12} />}
+                      {editMode ? "এডিট মোড" : "ভিউ মোড"}
+                    </button>
+                    <HamburgerMenu
+                      align="right"
+                      accent={NAVY}
+                      icon={<LayoutGrid size={26} color="#FFFFFF" strokeWidth={2} />}
+                      buttonClass="flex items-center justify-center active:opacity-80"
+                      buttonStyle={{ width: 54, height: 54, borderRadius: 17, background: NAVY }}
+                      items={[
+                        { label: "কাস্টমার মেমো", icon: <FileText size={17} />, onClick: () => setView("memos") },
+                        { label: "গ্রাহক লেজার / এন্ট্রি খুঁজুন", icon: <Search size={17} />, onClick: () => setView("ledger") },
+                        {
+                          label: backingUp ? "ব্যাকআপ তৈরি হচ্ছে…" : "ব্যাকআপ ডাউনলোড (CSV)",
+                          icon: <Download size={17} />,
+                          disabled: backingUp,
+                          onClick: () => {
+                            setBackingUp(true);
+                            downloadBackupCsv(() => setBackingUp(false));
+                          },
+                        },
+                      ]}
+                    />
+                  </div>
                 </div>
-              }
-              editMode={editMode}
-              onToggleMode={toggleEditMode}
-              menuItems={[
-                { label: "কাস্টমার মেমো", icon: <FileText size={17} />, onClick: () => setView("memos") },
-                { label: "গ্রাহক লেজার / এন্ট্রি খুঁজুন", icon: <Search size={17} />, onClick: () => setView("ledger") },
-                {
-                  label: backingUp ? "ব্যাকআপ তৈরি হচ্ছে…" : "ব্যাকআপ ডাউনলোড (CSV)",
-                  icon: <Download size={17} />,
-                  disabled: backingUp,
-                  onClick: () => {
-                    setBackingUp(true);
-                    downloadBackupCsv(() => setBackingUp(false));
-                  },
-                },
-              ]}
-            />
 
-            <div className="px-3 pt-5 pb-1 lg:flex">
-              <button
-                onClick={() => setView("dues")}
-                className="w-full flex items-center justify-between px-4 py-4 rounded-sm active:opacity-80 lg:w-auto lg:min-w-[320px] lg:max-w-sm"
-                style={{ background: "#8C2F26", color: "#F3ECDD" }}
-              >
-                <div className="text-left">
-                  <div style={{ fontFamily: "'Noto Serif Bengali', serif", fontSize: 17 }}>বাকির লিস্ট</div>
-                  <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 2 }}>
-                    {allDuesLoading ? "লোড হচ্ছে…" : `${toBn(allDues.length)} টা এন্ট্রি`}
+                {/* আজকের মোট বিক্রি */}
+                <button onClick={goToday} className="w-full text-left px-5 py-5 mb-3 active:opacity-90" style={card}>
+                  <div style={{ color: GRAY, fontSize: 19 }}>আজকের মোট বিক্রি</div>
+                  <div style={{ color: NAVY, fontSize: 40, fontWeight: 700, lineHeight: 1.2, marginTop: 8 }}>{val(sale)}</div>
+                  <div className="flex items-center gap-1.5 mt-3" style={{ color: "#2F7A4F", fontSize: 16 }}>
+                    <TrendingUp size={19} strokeWidth={2} /> দৈনিক বিক্রির সারাংশ
                   </div>
-                </div>
-                <div className="text-right ml-4">
-                  <div style={{ fontSize: 18, fontWeight: 700 }}>
-                    {allDuesLoading ? "…" : fmt(allDues.reduce((s, e) => s + (e.amount || 0), 0))}
-                  </div>
-                  <div style={{ fontSize: 10.5, opacity: 0.8 }}>দেখতে ট্যাপ করুন</div>
-                </div>
-              </button>
-            </div>
+                </button>
 
-            {todaySummary && (
-              <div className="px-3 pt-3">
-                <SectionTitle label="আজকের হিসাব" />
-                <div className="rounded-sm overflow-hidden mb-1" style={{ border: "1px solid #8C2F26" }}>
-                  <div className="grid grid-cols-3" style={{ background: "#FFFDF7" }}>
-                    <div className="px-2 py-2 text-center" style={{ borderRight: "1px solid #EADFC4" }}>
-                      <div style={{ fontSize: 10, color: "#6B5D4A" }}>আয়</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#2A211B" }}>{fmt(todayLoading ? 0 : todaySummary.itemsTotal)}</div>
+                {/* ২×২ কার্ড */}
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  {stats.map((st) => (
+                    <div key={st.label} className="px-4 py-4" style={{ ...card, color: st.color }}>
+                      {st.icon}
+                      <div style={{ color: GRAY, fontSize: 17, marginTop: 8 }}>{st.label}</div>
+                      <div style={{ fontSize: 25, fontWeight: 700, marginTop: 8, lineHeight: 1.2 }}>{val(st.value)}</div>
                     </div>
-                    <div className="px-2 py-2 text-center" style={{ borderRight: "1px solid #EADFC4" }}>
-                      <div style={{ fontSize: 10, color: "#6B5D4A" }}>খরচ</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#B5473C" }}>{fmt(todayLoading ? 0 : todaySummary.expenseTotal)}</div>
-                    </div>
-                    <div className="px-2 py-2 text-center" style={{ background: "#8C2F26" }}>
-                      <div style={{ fontSize: 10, color: "#F3ECDD", opacity: 0.85 }}>অবশিষ্ট</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#F3ECDD" }}>{fmt(todayLoading ? 0 : todaySummary.remaining)}</div>
+                  ))}
+                </div>
+
+                {/* বাকির লিস্ট */}
+                <button onClick={() => setView("dues")} className="w-full flex items-center justify-between px-5 py-4 mb-3 active:opacity-90" style={card}>
+                  <div className="text-left">
+                    <div style={{ color: NAVY, fontSize: 18, fontWeight: 700 }}>বাকির লিস্ট</div>
+                    <div style={{ color: GRAY, fontSize: 13, marginTop: 2 }}>
+                      {allDuesLoading ? "লোড হচ্ছে…" : `${toBn(allDues.length)} টা এন্ট্রি · দেখতে ট্যাপ করুন`}
                     </div>
                   </div>
+                  <div style={{ color: "#B24A45", fontSize: 21, fontWeight: 700 }}>
+                    {allDuesLoading ? "…" : money(allDues.reduce((a, e) => a + (e.amount || 0), 0))}
+                  </div>
+                </button>
+
+                {/* বছর বেছে নিন */}
+                <div className="px-5 py-4" style={card}>
+                  <p style={{ color: GRAY, fontSize: 14, marginBottom: 8 }}>বছর বেছে নিন</p>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const y = Number(e.target.value);
+                      if (y) {
+                        setYear(y);
+                        setView("months");
+                      }
+                    }}
+                    className="w-full px-4 py-3 outline-none"
+                    style={{ border: `1px solid ${NAVY}`, background: "#F5F6FA", color: NAVY, fontSize: 16, fontWeight: 600, borderRadius: 14 }}
+                  >
+                    <option value="" disabled>
+                      একটা সন সিলেক্ট করুন
+                    </option>
+                    {YEARS.map((y) => (
+                      <option key={y} value={y}>
+                        সন {toBn(y)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
-
-            <div className="px-4 pt-4 pb-6">
-              <p style={{ color: "#6B5D4A", fontSize: 13, marginBottom: 8 }}>বছর বেছে নিন</p>
-              <select
-                value=""
-                onChange={(e) => {
-                  const y = Number(e.target.value);
-                  if (y) {
-                    setYear(y);
-                    setView("months");
-                  }
-                }}
-                className="w-full px-4 py-4 rounded-sm outline-none"
-                style={{
-                  border: "1px solid #8C2F26",
-                  background: "#FFFDF7",
-                  color: "#8C2F26",
-                  fontFamily: "'Noto Serif Bengali', serif",
-                  fontSize: 17,
-                }}
-              >
-                <option value="" disabled>
-                  একটা সন সিলেক্ট করুন
-                </option>
-                {YEARS.map((y) => (
-                  <option key={y} value={y}>
-                    সন {toBn(y)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-          </>
-        )}
+            );
+          })()}
 
         {/* ---------- DUES (all years) ---------- */}
         {view === "dues" && (
