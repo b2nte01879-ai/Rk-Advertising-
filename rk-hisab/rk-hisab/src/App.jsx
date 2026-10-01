@@ -521,8 +521,8 @@ function printCustomerMemo(memo) {
       .sign{display:flex;justify-content:space-between;margin-top:56px;font-size:12px;color:#6B7390;}
       .sign span{border-top:1px solid #6B7390;padding-top:4px;min-width:130px;text-align:center;}
       @media print{ body{padding:10mm;} }
-    </style>
-    </head><body>
+    .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}</style>
+    </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
       <div class="letterhead">
         <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
         <p>আবুল বিড়ি ফ্যাক্টরির বিপরীতে, ডি.টি রোড, পাহাড়তলী, চট্টগ্রাম</p>
@@ -927,6 +927,8 @@ export default function LedgerApp() {
   const [ledgerQuery, setLedgerQuery] = useState("");
   const [paymentInputs, setPaymentInputs] = useState({});
   const [payingKey, setPayingKey] = useState(null);
+  const settlingRef = useRef(false); // ডাবল/ট্রিপল ট্যাপ ঠেকানোর লক
+  const addingDueRef = useRef(false);
   const [backingUp, setBackingUp] = useState(false);
 
   // ---- কাস্টমার মেমো ও সরাসরি বাকি ----
@@ -1125,6 +1127,8 @@ export default function LedgerApp() {
     const input = paymentInputs[key] || {};
     const amount = num(input.amount);
     if (isNaN(amount) || amount <= 0) return;
+    if (settlingRef.current) return; // আগের ক্লিকের কাজ চলছে — আবার চলবে না
+    settlingRef.current = true;
     const dateStr = input.date || todayInputValue();
     const [py, pm, pd] = dateStr.split("-").map(Number);
     setPayingKey(key);
@@ -1140,6 +1144,7 @@ export default function LedgerApp() {
       setAllDues(await loadAllDuesFlat());
       setAllDuesLoading(false);
     } finally {
+      settlingRef.current = false;
       setPayingKey(null);
     }
   };
@@ -1187,6 +1192,8 @@ export default function LedgerApp() {
       window.alert("নাম আর বাকির টাকা দিন।");
       return;
     }
+    if (addingDueRef.current) return;
+    addingDueRef.current = true;
     const [yy, mm, dd] = (newDue.date || todayInputValue()).split("-").map(Number);
     setAddingDue(true);
     try {
@@ -1197,6 +1204,7 @@ export default function LedgerApp() {
       setNewDue({ name: "", amount: "", date: "" });
       setAllDues(await loadAllDuesFlat());
     } finally {
+      addingDueRef.current = false;
       setAddingDue(false);
     }
   };
@@ -1368,8 +1376,8 @@ export default function LedgerApp() {
         th,td{border:1px solid #D9DDEB;padding:6px 10px;font-size:13px;}
         th{background:#1F2F5C;color:#fff;text-align:left;}
         tfoot td{font-weight:bold;background:#E8EBF5;}
-      </style>
-      </head><body>
+      .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}</style>
+      </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
       <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
       <p class="sub">মাসিক রিপোর্ট — ${MONTH_NAMES[m - 1]}, ${toBn(y)}</p>
       <table>
@@ -1945,7 +1953,7 @@ export default function LedgerApp() {
                             />
                             <button
                               onClick={() => handleSettlePayment(e, key)}
-                              disabled={payingKey === key || !num(input.amount) || num(input.amount) <= 0}
+                              disabled={payingKey !== null || !num(input.amount) || num(input.amount) <= 0}
                               className="px-2.5 py-1 rounded-xl active:opacity-70 ml-auto"
                               style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}
                             >
@@ -2551,8 +2559,9 @@ export default function LedgerApp() {
               </div>
             )}
 
-            <div className="px-3 pt-3" style={editMode ? undefined : { pointerEvents: "none", opacity: 0.8 }}>
-              {/* ---- ড্রাফট প্যানেল: নতুন এন্ট্রি বা ক্লিক করে আনা এন্ট্রি এডিট ---- */}
+            <div className="px-3 pt-3">
+              {/* ---- ড্রাফট প্যানেল: শুধু এডিট মোডে দেখায় ---- */}
+              {editMode && (
               <div className="rounded-xl mb-5" style={{ border: "2.5px solid #1F2F5C", background: "#F5F6FA" }}>
                 <div className="flex items-center justify-center gap-2 px-3 pt-3 pb-2">
                   <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "#1F2F5C" }}>তারিখ</span>
@@ -2788,6 +2797,7 @@ export default function LedgerApp() {
                   </button>
                 </div>
               </div>
+              )}
 
               {/* ---- প্রতিদিনের বক্স ---- */}
               {monthLoading ? (
@@ -2843,8 +2853,8 @@ export default function LedgerApp() {
                                     dayData.items.map((row) => (
                                       <tr
                                         key={row.id}
-                                        onClick={() => loadClickedSale(year, month, d, row)}
-                                        style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: "pointer" }}
+                                        onClick={editMode ? () => loadClickedSale(year, month, d, row) : undefined}
+                                        style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: editMode ? "pointer" : "default" }}
                                       >
                                         <td style={{ padding: "5px 6px" }}>{row.name}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>{row.height || "—"}</td>
@@ -2860,6 +2870,7 @@ export default function LedgerApp() {
                                         </td>
                                         <td style={{ padding: "5px 6px", textAlign: "right", color: "#C97B2E" }}>{row.discount || 0}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                                          {editMode && (
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
@@ -2869,6 +2880,7 @@ export default function LedgerApp() {
                                           >
                                             <Trash2 size={13} />
                                           </button>
+                                          )}
                                         </td>
                                       </tr>
                                     ))
@@ -2898,12 +2910,13 @@ export default function LedgerApp() {
                                     dayData.expenses.map((row) => (
                                       <tr
                                         key={row.id}
-                                        onClick={() => loadClickedExpense(year, month, d, row)}
-                                        style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: "pointer" }}
+                                        onClick={editMode ? () => loadClickedExpense(year, month, d, row) : undefined}
+                                        style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: editMode ? "pointer" : "default" }}
                                       >
                                         <td style={{ padding: "5px 6px" }}>{row.name}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>{fmt(num(row.amount) || 0)}</td>
                                         <td style={{ padding: "5px 6px", textAlign: "right" }}>
+                                          {editMode && (
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
@@ -2913,6 +2926,7 @@ export default function LedgerApp() {
                                           >
                                             <Trash2 size={13} />
                                           </button>
+                                          )}
                                         </td>
                                       </tr>
                                     ))
