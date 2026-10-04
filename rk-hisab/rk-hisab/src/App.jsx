@@ -80,6 +80,11 @@ html,body{background:var(--outer);}
 .rk-outer{background:var(--outer);color:var(--ink);}
 @media (min-width:1024px){.rk-outer{background:var(--bg);}}
 .rk-active:active{background:var(--active);}
+:root{--rk-z:1;}
+@media (min-width:1024px){:root{--rk-z:1.35;}}
+@media (min-width:1440px){:root{--rk-z:1.55;}}
+.rk-zoomable{zoom:var(--rk-z);}
+.rk-sheet-card{zoom:var(--rk-z);max-height:calc(94vh / var(--rk-z));}
 `;
 function applyTheme(dark) {
   document.documentElement.classList.toggle("rk-dark", !!dark);
@@ -1316,10 +1321,16 @@ const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeh
     const left = Math.max(8, Math.min(r.left, vw - width - 8));
     const below = vh - r.bottom;
     const up = below < 260 && r.top > below;
+    let z = 1;
+    try {
+      z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rk-z")) || 1;
+    } catch (e) {
+      /* ignore */
+    }
     setPos(
       up
-        ? { left, width, bottom: vh - r.top + 2, maxH: Math.max(150, Math.min(280, r.top - 12)) }
-        : { left, width, top: r.bottom + 2, maxH: Math.max(150, Math.min(280, below - 12)) }
+        ? { z, left, width, bottom: vh - r.top + 2, maxH: Math.max(150, Math.min(300, r.top - 12)) }
+        : { z, left, width, top: r.bottom + 2, maxH: Math.max(150, Math.min(300, below - 12)) }
     );
     setAdding(false);
     setNewName("");
@@ -1384,10 +1395,11 @@ const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeh
             style={{
               position: "fixed",
               zIndex: 120,
-              left: pos.left,
-              width: pos.width,
-              ...(pos.top !== undefined ? { top: pos.top } : { bottom: pos.bottom }),
-              maxHeight: pos.maxH,
+              zoom: pos.z,
+              left: pos.left / pos.z,
+              width: pos.width / pos.z,
+              ...(pos.top !== undefined ? { top: pos.top / pos.z } : { bottom: pos.bottom / pos.z }),
+              maxHeight: pos.maxH / pos.z,
               border: "1px solid var(--navy-line)",
               background: "var(--card)",
               boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
@@ -2648,6 +2660,7 @@ export default function LedgerApp() {
       `}</style>
       {toast && (
         <div
+          className="rk-zoomable"
           style={{
             position: "fixed",
             left: "50%",
@@ -2663,7 +2676,7 @@ export default function LedgerApp() {
             gap: 14,
             alignItems: "center",
             boxShadow: "0 6px 20px rgba(31,47,92,0.35)",
-            maxWidth: "92vw",
+            maxWidth: "calc(92vw / var(--rk-z))",
             fontFamily: "'Noto Sans Bengali', sans-serif",
           }}
         >
@@ -2688,7 +2701,7 @@ export default function LedgerApp() {
             <button
               onClick={() => setSaleSheetOpen(true)}
               aria-label="বিক্রি ও খরচের ফর্ম খুলুন"
-              className="fixed flex items-center gap-2 active:opacity-80"
+              className="rk-zoomable fixed flex items-center gap-2 active:opacity-80"
               style={{
                 zIndex: 60,
                 right: 16,
@@ -2713,15 +2726,15 @@ export default function LedgerApp() {
           )}
           {saleSheetOpen && (
             <div
-              className="fixed inset-0 flex items-end sm:items-center justify-center"
+              className="fixed inset-0 flex items-end sm:items-center justify-center sm:p-4"
               style={{ zIndex: 70, background: "rgba(8,12,22,0.6)" }}
               onMouseDown={(e) => {
                 if (e.target === e.currentTarget) setSaleSheetOpen(false);
               }}
             >
               <div
-                className="w-full flex flex-col rounded-t-2xl sm:rounded-2xl"
-                style={{ maxWidth: 1100, maxHeight: "94vh", background: "var(--bg)", border: "2.5px solid var(--navy-line)", fontFamily: "'Noto Sans Bengali', sans-serif" }}
+                className="rk-sheet-card w-full flex flex-col rounded-t-2xl sm:rounded-2xl"
+                style={{ maxWidth: 1100, background: "var(--bg)", border: "2.5px solid var(--navy-line)", fontFamily: "'Noto Sans Bengali', sans-serif" }}
               >
                 <div className="flex items-center justify-between px-4 pt-3 pb-2">
                   <div>
