@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu, LayoutGrid, TrendingUp, Wallet, Receipt, Clock, BarChart3 } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu, LayoutGrid, TrendingUp, Wallet, Receipt, Clock, BarChart3, Users, Settings, Share2, MessageCircle, MessageSquare, Phone, RotateCcw } from "lucide-react";
 import { storage } from "./firebase";
 
 // ---------- constants ----------
@@ -482,6 +482,604 @@ async function syncMemoDue(memo, dueAmount) {
   await saveManualDues(rest);
 }
 
+// ---------- দোকানের তথ্য (লোগো / ঠিকানা / ফোন) ----------
+const SHOP_KEY = "shopinfo";
+const DEFAULT_SHOP = {
+  name: "R.K ADVERTISING AND DIGITAL HOUSE",
+  address: "আবুল বিড়ি ফ্যাক্টরির বিপরীতে, ডি.টি রোড, পাহাড়তলী, চট্টগ্রাম",
+  phone: "০১৭৯৬২১৬৮৩৩",
+  logo: "",
+};
+let shopInfo = { ...DEFAULT_SHOP };
+const getShop = () => shopInfo;
+function setShopInfo(v) {
+  shopInfo = { ...DEFAULT_SHOP, ...(v || {}) };
+}
+async function loadShopInfo() {
+  const raw = await kget(SHOP_KEY);
+  if (raw) {
+    try {
+      setShopInfo(JSON.parse(raw));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return shopInfo;
+}
+async function saveShopInfo(v) {
+  setShopInfo(v);
+  return await kset(SHOP_KEY, JSON.stringify(shopInfo));
+}
+
+// প্রিন্ট পেজের মাথার অংশ (লোগো + নাম + ঠিকানা + ফোন)
+const LETTERHEAD_CSS =
+  ".letterhead{display:flex;align-items:center;justify-content:center;gap:14px;border-bottom:2px solid #1F2F5C;padding-bottom:10px;margin-bottom:14px;}" +
+  ".letterhead .logo{height:64px;max-width:120px;object-fit:contain;}" +
+  ".letterhead .lh-text{text-align:center;}" +
+  ".letterhead h1{color:#1F2F5C;font-size:22px;margin:0;}" +
+  ".letterhead p{color:#6B7390;font-size:12px;margin:4px 0 0;}";
+const shopLetterheadHtml = () => {
+  const s = getShop();
+  return `<div class="letterhead">${s.logo ? `<img class="logo" src="${s.logo}" alt="logo" />` : ""}<div class="lh-text"><h1>${esc(
+    s.name
+  )}</h1>${s.address ? `<p>${esc(s.address)}</p>` : ""}${s.phone ? `<p>ফোন: ${esc(s.phone)}</p>` : ""}</div></div>`;
+};
+
+// লোগো ছোট করে (সর্বোচ্চ ২২০px) JPEG ডেটা-URL বানানো — যাতে সেভ হালকা থাকে
+function resizeImageToDataUrl(file, maxSide = 220) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("read"));
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("img"));
+      img.onload = () => {
+        const sc = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * sc));
+        const h = Math.max(1, Math.round(img.height * sc));
+        const cv = document.createElement("canvas");
+        cv.width = w;
+        cv.height = h;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+// ---------- ফোন / রিমাইন্ডার / কাস্টমার হেল্পার ----------
+const custKey = (n) => String(n || "").trim().toLowerCase().replace(/\s+/g, " ");
+const digitsOnly = (p) =>
+  String(p || "")
+    .replace(/[০-৯]/g, (c) => String("০১২৩৪৫৬৭৮৯".indexOf(c)))
+    .replace(/\D/g, "");
+function intlPhone(p) {
+  const d = digitsOnly(p);
+  if (!d) return "";
+  if (d.startsWith("880")) return d;
+  if (d.startsWith("0")) return "88" + d;
+  if (d.length === 10 && d.startsWith("1")) return "880" + d;
+  return d;
+}
+const daysSince = (y, m, d) => Math.floor((Date.now() - new Date(y, m - 1, d).getTime()) / 86400000);
+const shopSignoff = () => {
+  const s = getShop();
+  return `${s.name}${s.phone ? ` (${s.phone})` : ""}`;
+};
+const dueMessage = (name, amount, y, m, d) =>
+  `আসসালামু আলাইকুম ${name}, ${toBn(d)} ${MONTH_NAMES[m - 1]} ${toBn(y)} তারিখ থেকে আপনার ৳${toBn(
+    fmt(amount)
+  )} টাকা বাকি আছে। অনুগ্রহ করে সুবিধামতো পরিশোধ করবেন। ধন্যবাদ।\n— ${shopSignoff()}`;
+const dueMessageTotal = (name, amount) =>
+  `আসসালামু আলাইকুম ${name}, আপনার মোট ৳${toBn(fmt(amount))} টাকা বাকি আছে। অনুগ্রহ করে সুবিধামতো পরিশোধ করবেন। ধন্যবাদ।\n— ${shopSignoff()}`;
+const memoText = (mm) => {
+  const c = memoCalc(mm);
+  return `${getShop().name}\nমেমো নং ${toBn(mm.no)} — ${toBn(mm.d)} ${MONTH_NAMES[mm.m - 1]}, ${toBn(mm.y)}\nকাস্টমার: ${
+    mm.customer
+  }\nসর্বমোট: ৳${toBn(fmt(c.total))}\nজমা: ৳${toBn(fmt(c.paid))}\nবাকি: ৳${toBn(fmt(c.due))}`;
+};
+function openWhatsApp(phone, text) {
+  const p = intlPhone(phone);
+  window.open(`https://wa.me/${p}?text=${encodeURIComponent(text)}`, "_blank");
+}
+function openSms(phone, text) {
+  const p = digitsOnly(phone);
+  const sep = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? "&" : "?";
+  window.location.href = `sms:${p}${sep}body=${encodeURIComponent(text)}`;
+}
+function openCall(phone) {
+  window.location.href = `tel:${digitsOnly(phone)}`;
+}
+
+// মেমো + বাকির তালিকা থেকে কাস্টমারভিত্তিক হিসাব
+function buildCustomers(memos, dues) {
+  const map = {};
+  const touch = (name) => {
+    const k = custKey(name);
+    if (!k) return null;
+    if (!map[k]) map[k] = { key: k, name: String(name).trim(), phone: "", address: "", memos: [], dues: [], billed: 0, paid: 0, due: 0, lastVal: 0 };
+    return map[k];
+  };
+  const val = (o) => o.y * 10000 + o.m * 100 + o.d;
+  [...memos]
+    .sort((a, b) => val(a) - val(b) || (a.no || 0) - (b.no || 0))
+    .forEach((mm) => {
+      const c = touch(mm.customer);
+      if (!c) return;
+      const calc = memoCalc(mm);
+      c.memos.push(mm);
+      c.billed += calc.subtotal - calc.discount;
+      c.paid += calc.paid;
+      c.name = String(mm.customer).trim();
+      if (mm.phone) c.phone = mm.phone;
+      if (mm.address) c.address = mm.address;
+      c.lastVal = Math.max(c.lastVal, val(mm));
+    });
+  dues.forEach((e) => {
+    if (!e.manual) return;
+    const c = touch(e.name);
+    if (!c) return;
+    c.dues.push(e);
+    if (e.phone && !c.phone) c.phone = e.phone;
+    c.lastVal = Math.max(c.lastVal, val(e));
+  });
+  dues.forEach((e) => {
+    if (e.manual) return;
+    const c = map[custKey(e.name)];
+    if (!c) return;
+    c.dues.push(e);
+    c.lastVal = Math.max(c.lastVal, val(e));
+  });
+  Object.values(map).forEach((c) => {
+    c.due = c.dues.reduce((s, e) => s + (e.amount || 0), 0);
+  });
+  return Object.values(map);
+}
+
+function customerRows(c) {
+  const val = (o) => o.y * 10000 + o.m * 100 + o.d;
+  return [
+    ...c.memos.map((mm) => {
+      const cc = memoCalc(mm);
+      return { kind: "memo", mm, val: val(mm), y: mm.y, m: mm.m, d: mm.d, label: `মেমো নং ${toBn(mm.no)}`, total: cc.total, paid: cc.paid, due: cc.due };
+    }),
+    ...c.dues
+      .filter((e) => !e.memoId)
+      .map((e) => ({
+        kind: "due",
+        val: val(e),
+        y: e.y,
+        m: e.m,
+        d: e.d,
+        label: e.manual ? "সরাসরি বাকি" : "দৈনিক হিসাবের বাকি",
+        total: e.amount || 0,
+        paid: 0,
+        due: e.amount || 0,
+      })),
+  ].sort((a, b) => b.val - a.val);
+}
+
+// ---------- রিসাইকেল বিন (মোছা এন্ট্রি ৩০ দিন ফিরিয়ে আনা যায়) ----------
+const TRASH_KEY = "trash";
+async function loadTrash() {
+  const raw = await kget(TRASH_KEY);
+  if (raw) {
+    try {
+      const cutoff = Date.now() - 30 * 86400000;
+      return JSON.parse(raw).filter((x) => x.at > cutoff);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return [];
+}
+async function saveTrash(list) {
+  return await kset(TRASH_KEY, JSON.stringify(list.slice(0, 80)));
+}
+async function addToTrash(entry) {
+  const item = { tid: emptyRowId(), at: Date.now(), ...entry };
+  const list = await loadTrash();
+  list.unshift(item);
+  await saveTrash(list);
+  return item;
+}
+
+// ---------- PDF বানানো ও শেয়ার (কোনো বাড়তি লাইব্রেরি ছাড়া) ----------
+// মেমো/বিবরণীকে ক্যানভাসে এঁকে JPEG করা হয়, তারপর সেটা PDF পাতায় বসানো হয়
+async function renderDocCanvases(doc) {
+  const S = 2;
+  const PW = 794;
+  const PH = 1123;
+  const M = 40;
+  const NAVY = "#1F2F5C";
+  const GRAY = "#6B7390";
+  const INK = "#1B2340";
+  const LINE = "#D9DDEB";
+  const FONT = "'Noto Sans Bengali', 'Noto Sans', sans-serif";
+  try {
+    await Promise.all([document.fonts.load(`400 16px ${FONT}`, "অআকখ"), document.fonts.load(`700 16px ${FONT}`, "অআকখ")]);
+  } catch (e) {
+    /* ফন্ট না এলেও চলবে */
+  }
+  const shop = getShop();
+  let logoImg = null;
+  if (shop.logo) {
+    logoImg = await new Promise((res) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => res(null);
+      im.src = shop.logo;
+    });
+  }
+  const pages = [];
+  let cv = null;
+  let ctx = null;
+  let y = M;
+  const newPage = () => {
+    cv = document.createElement("canvas");
+    cv.width = PW * S;
+    cv.height = PH * S;
+    ctx = cv.getContext("2d");
+    ctx.scale(S, S);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, PW, PH);
+    ctx.textBaseline = "alphabetic";
+    pages.push(cv);
+    y = M;
+  };
+  const setFont = (size, bold) => {
+    ctx.font = `${bold ? 700 : 400} ${size}px ${FONT}`;
+  };
+  const fit = (txt, maxW) => {
+    let t = String(txt === null || txt === undefined ? "" : txt);
+    if (!maxW || ctx.measureText(t).width <= maxW) return t;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+    return t + "…";
+  };
+  const text = (txt, x, yy, o = {}) => {
+    const { size = 14, bold = false, color = INK, align = "left", maxW } = o;
+    setFont(size, bold);
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.fillText(fit(txt, maxW), x, yy);
+  };
+  const hline = (yy, color, w) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(M, yy);
+    ctx.lineTo(PW - M, yy);
+    ctx.stroke();
+  };
+  const wrapLines = (txt, maxW, size) => {
+    setFont(size, false);
+    const words = String(txt).split(/\s+/);
+    const lines = [];
+    let cur = "";
+    words.forEach((w) => {
+      const t = cur ? cur + " " + w : w;
+      if (ctx.measureText(t).width > maxW && cur) {
+        lines.push(cur);
+        cur = w;
+      } else cur = t;
+    });
+    if (cur) lines.push(cur);
+    return lines;
+  };
+  const tw = PW - 2 * M;
+  const drawHead = () => {
+    if (!doc.table) return;
+    ctx.fillStyle = NAVY;
+    ctx.fillRect(M, y, tw, 28);
+    let x = M;
+    doc.table.cols.forEach((c) => {
+      const w = c.w * tw;
+      const tx = c.align === "right" ? x + w - 8 : c.align === "center" ? x + w / 2 : x + 8;
+      text(c.label, tx, y + 19, { size: 13, bold: true, color: "#ffffff", align: c.align || "left", maxW: w - 16 });
+      x += w;
+    });
+    y += 28;
+  };
+  const ensure = (h, withHead) => {
+    if (y + h > PH - M - 30) {
+      newPage();
+      if (withHead) drawHead();
+    }
+  };
+
+  newPage();
+  // মাথার অংশ
+  let logoW = 0;
+  if (logoImg) {
+    const h = 60;
+    logoW = Math.min(120, (logoImg.width * h) / logoImg.height);
+    ctx.drawImage(logoImg, M, y, logoW, h);
+  }
+  const hw = PW - 2 * M - 2 * (logoW ? logoW + 10 : 0);
+  text(shop.name, PW / 2, y + 24, { size: 22, bold: true, color: NAVY, align: "center", maxW: hw });
+  if (shop.address) text(shop.address, PW / 2, y + 46, { size: 12.5, color: GRAY, align: "center", maxW: hw });
+  if (shop.phone) text(`ফোন: ${shop.phone}`, PW / 2, y + 64, { size: 12.5, color: GRAY, align: "center", maxW: hw });
+  y += 76;
+  hline(y, NAVY, 2);
+  y += 22;
+
+  if (doc.metaLeft) text(doc.metaLeft, M, y, { size: 14 });
+  if (doc.metaRight) text(doc.metaRight, PW - M, y, { size: 14, align: "right" });
+  y += 26;
+  (doc.customerLines || []).forEach((ln, i) => {
+    text(ln, M, y, { size: i === 0 ? 17 : 13.5, bold: i === 0, color: i === 0 ? INK : GRAY, maxW: tw });
+    y += i === 0 ? 24 : 21;
+  });
+  y += 10;
+
+  if (doc.table) {
+    drawHead();
+    doc.table.rows.forEach((r) => {
+      ensure(30, true);
+      let x = M;
+      doc.table.cols.forEach((c, i) => {
+        const w = c.w * tw;
+        const tx = c.align === "right" ? x + w - 8 : c.align === "center" ? x + w / 2 : x + 8;
+        text(r[i], tx, y + 19, { size: 13.5, align: c.align || "left", maxW: w - 16 });
+        x += w;
+      });
+      y += 28;
+      hline(y, LINE, 1);
+    });
+  }
+
+  if (doc.summary && doc.summary.length) {
+    y += 14;
+    ensure(doc.summary.length * 28 + 20, false);
+    const bx = PW - M - 320;
+    doc.summary.forEach((row) => {
+      const label = row[0];
+      const value = row[1];
+      const strong = !!row[2];
+      if (strong) {
+        ctx.strokeStyle = NAVY;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx, y);
+        ctx.lineTo(PW - M, y);
+        ctx.stroke();
+        y += 6;
+      }
+      text(label, bx + 4, y + 18, { size: strong ? 17 : 14, bold: strong, color: strong ? NAVY : INK });
+      text(value, PW - M - 4, y + 18, { size: strong ? 17 : 14, bold: strong, color: strong ? NAVY : INK, align: "right" });
+      y += strong ? 30 : 25;
+    });
+  }
+
+  if (doc.note) {
+    y += 12;
+    wrapLines(doc.note, tw, 13).forEach((ln) => {
+      ensure(22, false);
+      text(ln, M, y + 14, { size: 13, color: GRAY });
+      y += 21;
+    });
+  }
+
+  ensure(90, false);
+  const sy = Math.max(y + 56, PH - M - 30);
+  const labels = doc.signLabels || ["গ্রাহকের স্বাক্ষর", "কর্তৃপক্ষ"];
+  [
+    [M, M + 160],
+    [PW - M - 160, PW - M],
+  ].forEach((seg, i) => {
+    ctx.strokeStyle = GRAY;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(seg[0], sy);
+    ctx.lineTo(seg[1], sy);
+    ctx.stroke();
+    text(labels[i], (seg[0] + seg[1]) / 2, sy + 18, { size: 12, color: GRAY, align: "center" });
+  });
+  return pages;
+}
+
+async function canvasesToJpegs(cvs) {
+  const out = [];
+  for (const c of cvs) {
+    const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.92));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    out.push({ bytes, w: c.width, h: c.height });
+  }
+  return out;
+}
+
+function buildPdfFromJpegs(pages) {
+  const enc = new TextEncoder();
+  const parts = [];
+  let offset = 0;
+  const push = (x) => {
+    const b = typeof x === "string" ? enc.encode(x) : x;
+    parts.push(b);
+    offset += b.length;
+  };
+  const offsets = [];
+  const objStart = (n) => {
+    offsets[n] = offset;
+    push(`${n} 0 obj\n`);
+  };
+  const PWpt = 595.28;
+  const PHpt = 841.89;
+  const total = 2 + pages.length * 3;
+  push("%PDF-1.4\n");
+  objStart(1);
+  push("<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  objStart(2);
+  push(`<< /Type /Pages /Kids [${pages.map((_, i) => `${3 + i * 3} 0 R`).join(" ")}] /Count ${pages.length} >>\nendobj\n`);
+  pages.forEach((pg, i) => {
+    const po = 3 + i * 3;
+    const co = po + 1;
+    const io = po + 2;
+    objStart(po);
+    push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PWpt} ${PHpt}] /Resources << /XObject << /Im0 ${io} 0 R >> >> /Contents ${co} 0 R >>\nendobj\n`);
+    const content = `q ${PWpt} 0 0 ${PHpt} 0 0 cm /Im0 Do Q`;
+    objStart(co);
+    push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+    objStart(io);
+    push(`<< /Type /XObject /Subtype /Image /Width ${pg.w} /Height ${pg.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${pg.bytes.length} >>\nstream\n`);
+    push(pg.bytes);
+    push("\nendstream\nendobj\n");
+  });
+  const xref = offset;
+  let x = `xref\n0 ${total + 1}\n0000000000 65535 f \n`;
+  for (let n = 1; n <= total; n++) x += `${String(offsets[n]).padStart(10, "0")} 00000 n \n`;
+  push(x);
+  push(`trailer\n<< /Size ${total + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+  return new Blob(parts, { type: "application/pdf" });
+}
+
+async function makePdfBlob(doc) {
+  const cvs = await renderDocCanvases(doc);
+  return buildPdfFromJpegs(await canvasesToJpegs(cvs));
+}
+
+// ফোনে হলে শেয়ার-শিট (WhatsApp বেছে নেওয়া যায়), না হলে ডাউনলোড
+async function sharePdf(doc, filename, text) {
+  const blob = await makePdfBlob(doc);
+  const file = new File([blob], filename, { type: "application/pdf" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename, text });
+      return "shared";
+    } catch (e) {
+      if (e && e.name === "AbortError") return "cancelled";
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return "downloaded";
+}
+
+function memoToDoc(memo) {
+  const c = memoCalc(memo);
+  const used = memo.items.filter(memoItemUsed);
+  const summary = [];
+  if (used.length) summary.push(["সাবটোটাল", fmt(c.subtotal)]);
+  if (c.discount > 0) summary.push(["ছাড় (-)", fmt(c.discount)]);
+  if (c.prevDue > 0) summary.push(["পূর্বের বাকি (+)", fmt(c.prevDue)]);
+  summary.push(["সর্বমোট", fmt(c.total)]);
+  if (c.paid > 0) summary.push(["জমা (-)", fmt(c.paid)]);
+  summary.push(["বাকি", fmt(c.due), true]);
+  return {
+    metaLeft: `মেমো নং: ${toBn(memo.no)}`,
+    metaRight: `তারিখ: ${toBn(memo.d)} ${MONTH_NAMES[memo.m - 1]}, ${toBn(memo.y)}`,
+    customerLines: [memo.customer, memo.phone ? `ফোন: ${memo.phone}` : "", memo.address ? `ঠিকানা: ${memo.address}` : ""].filter(Boolean),
+    table: used.length
+      ? {
+          cols: [
+            { label: "নং", w: 0.07, align: "center" },
+            { label: "বিবরণ", w: 0.33 },
+            { label: "হাইট", w: 0.1, align: "right" },
+            { label: "ওয়েট", w: 0.1, align: "right" },
+            { label: "পরিমান", w: 0.1, align: "right" },
+            { label: "দাম", w: 0.13, align: "right" },
+            { label: "মোট", w: 0.17, align: "right" },
+          ],
+          rows: used.map((it, i) => [toBn(i + 1), it.name, it.height || "—", it.weight || "—", it.qty || "১", fmt(numOr0(it.price)), fmt(grossTotal(it))]),
+        }
+      : null,
+    summary,
+    note: memo.note ? `নোট: ${memo.note}` : "",
+  };
+}
+
+function statementToDoc(c) {
+  const rows = customerRows(c);
+  const now = new Date();
+  return {
+    metaLeft: "হিসাবের বিবরণী",
+    metaRight: `তারিখ: ${toBn(now.getDate())} ${MONTH_NAMES[now.getMonth()]}, ${toBn(now.getFullYear())}`,
+    customerLines: [c.name, c.phone ? `ফোন: ${c.phone}` : "", c.address ? `ঠিকানা: ${c.address}` : ""].filter(Boolean),
+    table: rows.length
+      ? {
+          cols: [
+            { label: "তারিখ", w: 0.2 },
+            { label: "বিবরণ", w: 0.28 },
+            { label: "সর্বমোট", w: 0.17, align: "right" },
+            { label: "জমা", w: 0.17, align: "right" },
+            { label: "বাকি", w: 0.18, align: "right" },
+          ],
+          rows: rows.map((r) => [`${toBn(r.d)} ${MONTH_NAMES[r.m - 1].slice(0, 3)} ${toBn(r.y)}`, r.label, fmt(r.total), r.paid ? fmt(r.paid) : "—", fmt(r.due)]),
+        }
+      : null,
+    summary: [
+      ["মোট বিল (ছাড়সহ)", fmt(c.billed)],
+      ["মোট জমা", fmt(c.paid)],
+      ["বর্তমান বাকি", fmt(c.due), true],
+    ],
+    note: "",
+    signLabels: ["গ্রাহকের স্বাক্ষর", "কর্তৃপক্ষ"],
+  };
+}
+
+function printCustomerStatement(c) {
+  const win = window.open("", "_blank");
+  if (!win) return;
+  const rows = customerRows(c)
+    .map(
+      (r) =>
+        `<tr><td>${toBn(r.d)} ${MONTH_NAMES[r.m - 1].slice(0, 3)} ${toBn(r.y)}</td><td>${esc(r.label)}</td><td style="text-align:right">${fmt(r.total)}</td><td style="text-align:right">${
+          r.paid ? fmt(r.paid) : "—"
+        }</td><td style="text-align:right">${fmt(r.due)}</td></tr>`
+    )
+    .join("");
+  const now = new Date();
+  win.document.write(`
+    <html><head><title>হিসাবের বিবরণী — ${esc(c.name)}</title>
+    <meta charset="utf-8" />
+    <style>
+      body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#1B2340;}
+      ${LETTERHEAD_CSS}
+      .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;}
+      .cust{font-size:13.5px;margin-bottom:14px;line-height:1.6;}
+      table{width:100%;border-collapse:collapse;}
+      th,td{border:1px solid #D9DDEB;padding:5px 8px;font-size:12.5px;}
+      th{background:#1F2F5C;color:#fff;text-align:left;}
+      .summary{width:300px;margin-left:auto;margin-top:16px;}
+      .summary td{border:none;padding:3px 4px;font-size:13px;}
+      .summary tr.total td{border-top:2px solid #1F2F5C;font-weight:bold;font-size:15px;color:#1F2F5C;}
+      .sign{display:flex;justify-content:space-between;margin-top:56px;font-size:12px;color:#6B7390;}
+      .sign span{border-top:1px solid #6B7390;padding-top:4px;min-width:130px;text-align:center;}
+      @media print{ body{padding:10mm;} }
+      .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}
+    </style>
+    </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
+      ${shopLetterheadHtml()}
+      <div class="meta"><span>হিসাবের বিবরণী</span><span>তারিখ: ${toBn(now.getDate())} ${MONTH_NAMES[now.getMonth()]}, ${toBn(now.getFullYear())}</span></div>
+      <div class="cust"><b>${esc(c.name)}</b>${c.phone ? `<br/>ফোন: ${esc(c.phone)}` : ""}${c.address ? `<br/>ঠিকানা: ${esc(c.address)}` : ""}</div>
+      ${
+        rows
+          ? `<table><thead><tr><th>তারিখ</th><th>বিবরণ</th><th>সর্বমোট</th><th>জমা</th><th>বাকি</th></tr></thead><tbody>${rows}</tbody></table>`
+          : ""
+      }
+      <table class="summary">
+        <tr><td>মোট বিল (ছাড়সহ)</td><td style="text-align:right">${fmt(c.billed)}</td></tr>
+        <tr><td>মোট জমা</td><td style="text-align:right">${fmt(c.paid)}</td></tr>
+        <tr class="total"><td>বর্তমান বাকি</td><td style="text-align:right">${fmt(c.due)}</td></tr>
+      </table>
+      <div class="sign"><span>গ্রাহকের স্বাক্ষর</span><span>কর্তৃপক্ষ</span></div>
+    </body></html>
+  `);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
+}
+
 function printCustomerMemo(memo) {
   const win = window.open("", "_blank");
   if (!win) return;
@@ -506,9 +1104,7 @@ function printCustomerMemo(memo) {
     <meta charset="utf-8" />
     <style>
       body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#1B2340;}
-      .letterhead{text-align:center;border-bottom:2px solid #1F2F5C;padding-bottom:10px;margin-bottom:14px;}
-      .letterhead h1{color:#1F2F5C;font-size:22px;margin:0;}
-      .letterhead p{color:#6B7390;font-size:12px;margin:4px 0 0;}
+      ${LETTERHEAD_CSS}
       .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;}
       .cust{font-size:13.5px;margin-bottom:14px;line-height:1.6;}
       table{width:100%;border-collapse:collapse;}
@@ -523,11 +1119,7 @@ function printCustomerMemo(memo) {
       @media print{ body{padding:10mm;} }
     .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}</style>
     </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
-      <div class="letterhead">
-        <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
-        <p>আবুল বিড়ি ফ্যাক্টরির বিপরীতে, ডি.টি রোড, পাহাড়তলী, চট্টগ্রাম</p>
-        <p>ফোন: ০১৭৯৬২১৬৮৩৩</p>
-      </div>
+      ${shopLetterheadHtml()}
       <div class="meta">
         <span>মেমো নং: ${toBn(memo.no)}</span>
         <span>তারিখ: ${toBn(memo.d)} ${MONTH_NAMES[memo.m - 1]}, ${toBn(memo.y)}</span>
@@ -796,6 +1388,30 @@ export default function LedgerApp() {
   const [view, setView] = useState("years"); // years | dues | memos | ledger | months | days | day
   const [editMode, setEditMode] = useState(false);
 
+  // ---- ছোট বার্তা (টোস্ট), অফলাইন চিহ্ন ----
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const showToast = (msg, action) => {
+    clearTimeout(toastTimer.current);
+    setToast({ msg, action });
+    toastTimer.current = setTimeout(() => setToast(null), action ? 9000 : 3000);
+  };
+  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
+  const [pending, setPending] = useState(0);
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    setPending(pendingCount());
+    const t = setInterval(() => setPending(pendingCount()), 4000);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+      clearInterval(t);
+    };
+  }, []);
+
   // পুরো অ্যাপ দেখার জন্য পাসওয়ার্ড লক (এডিট মোডের পিন থেকে আলাদা)
   const SITE_PASSWORD_KEY = "sitePassword";
   const [unlocked, setUnlocked] = useState(false);
@@ -861,7 +1477,7 @@ export default function LedgerApp() {
   useEffect(() => {
     const flush = async () => {
       const n = await flushPendingWrites();
-      if (n > 0) window.alert(`✅ ${toBn(n)} টা পেন্ডিং সেভ সার্ভারে পাঠানো হয়েছে।`);
+      if (n > 0) showToast(`✅ ${toBn(n)} টা পেন্ডিং সেভ সার্ভারে পাঠানো হয়েছে।`);
     };
     window.addEventListener("online", flush);
     flush();
@@ -938,7 +1554,18 @@ export default function LedgerApp() {
   const [memoDraft, setMemoDraft] = useState(null); // null হলে লিস্ট/ডিটেইল দেখায়
   const [memoView, setMemoView] = useState(null); // যে মেমো খুলে দেখা হচ্ছে
   const [memoSaving, setMemoSaving] = useState(false);
-  const [newDue, setNewDue] = useState({ name: "", amount: "", date: "" });
+  const [newDue, setNewDue] = useState({ name: "", amount: "", date: "", phone: "" });
+  const [dueFilter, setDueFilter] = useState("all"); // all | old7 | old15
+  const [openDue, setOpenDue] = useState(null);
+  const [custQuery, setCustQuery] = useState("");
+  const [custSel, setCustSel] = useState(null);
+  const openMemoRef = useRef(null);
+  const [sharing, setSharing] = useState(false);
+  const [ledgerType, setLedgerType] = useState("all");
+  const [trash, setTrash] = useState([]);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [shop, setShop] = useState(DEFAULT_SHOP);
+  const [shopDraft, setShopDraft] = useState(null);
   const [addingDue, setAddingDue] = useState(false);
 
   const [yearStats, setYearStats] = useState({ income: 0, expense: 0 });
@@ -1118,6 +1745,28 @@ export default function LedgerApp() {
     await recomputeAndSaveDay(py, pm, pd, { ...payRaw, items: items2 });
   }
 
+  const phoneOf = (name, entry) => {
+    if (entry && entry.phone) return entry.phone;
+    const k = custKey(name);
+    const mm = memos.find((x) => custKey(x.customer) === k && x.phone);
+    return mm ? mm.phone : "";
+  };
+
+  const handleSharePdf = async (doc, filename, text) => {
+    if (sharing) return;
+    setSharing(true);
+    showToast("PDF তৈরি হচ্ছে…");
+    try {
+      const r = await sharePdf(doc, filename, text);
+      if (r === "downloaded") showToast("PDF ডাউনলোড হয়েছে — WhatsApp-এ অ্যাটাচ করে পাঠান");
+      else setToast(null);
+    } catch (e) {
+      window.alert("PDF বানানো যায়নি — প্রিন্ট বাটন থেকে PDF সেভ করে নিন।");
+    } finally {
+      setSharing(false);
+    }
+  };
+
   const todayInputValue = () => {
     const now = new Date();
     return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
@@ -1143,6 +1792,7 @@ export default function LedgerApp() {
       setAllDuesLoading(true);
       setAllDues(await loadAllDuesFlat());
       setAllDuesLoading(false);
+      showToast(`✓ ৳${toBn(fmt(amount))} জমা হয়েছে`);
     } finally {
       settlingRef.current = false;
       setPayingKey(null);
@@ -1198,11 +1848,12 @@ export default function LedgerApp() {
     setAddingDue(true);
     try {
       const list = await loadManualDues();
-      list.push({ id: emptyRowId(), y: yy, m: mm, d: dd, name, amount });
+      list.push({ id: emptyRowId(), y: yy, m: mm, d: dd, name, amount, ...((newDue.phone || "").trim() ? { phone: newDue.phone.trim() } : {}) });
       const ok = await saveManualDues(list);
       if (!ok) window.alert("সার্ভারে সেভ হয়নি, তবে বাকি ফোনে জমা আছে — নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হবে। হারাবে না।");
-      setNewDue({ name: "", amount: "", date: "" });
+      setNewDue({ name: "", amount: "", date: "", phone: "" });
       setAllDues(await loadAllDuesFlat());
+      if (ok) showToast("✓ বাকি যোগ হয়েছে");
     } finally {
       addingDueRef.current = false;
       setAddingDue(false);
@@ -1211,6 +1862,9 @@ export default function LedgerApp() {
 
   const handleDeleteManualDue = async (e) => {
     if (!window.confirm(`${e.name} এর বাকি এন্ট্রিটা মুছে ফেলবেন?`)) return;
+    const cleanDue = { ...e };
+    delete cleanDue.manual;
+    const tItem = await addToTrash({ kind: "due", label: `${e.name} — বাকি ৳${fmt(e.amount)}`, y: e.y, m: e.m, d: e.d, data: cleanDue });
     const list = (await loadManualDues()).filter((x) => x.id !== e.id);
     await saveManualDues(list);
     if (e.memoId) {
@@ -1218,6 +1872,7 @@ export default function LedgerApp() {
       await saveMemosYear(e.memoY, ml.map((x) => (x.id === e.memoId ? { ...x, dueListId: null } : x)));
     }
     setAllDues(await loadAllDuesFlat());
+    showToast("বাকি এন্ট্রি মুছে ফেলা হয়েছে", { label: "ফিরিয়ে আনুন", fn: () => restoreTrash(tItem) });
   };
 
   // ---- মেমো ----
@@ -1324,6 +1979,7 @@ export default function LedgerApp() {
       setMemoDraft(null);
       setMemoView(record);
       await refreshMemos();
+      if (ok) showToast("✓ মেমো সেভ হয়েছে");
     } finally {
       setMemoSaving(false);
     }
@@ -1331,11 +1987,13 @@ export default function LedgerApp() {
 
   const handleDeleteMemo = async (memo) => {
     if (!window.confirm(`${memo.customer} এর মেমো নং ${toBn(memo.no)} মুছে ফেলবেন?`)) return;
+    const tItem = await addToTrash({ kind: "memo", label: `${memo.customer} — মেমো নং ${toBn(memo.no)}`, y: memo.y, m: memo.m, d: memo.d, data: memo });
     const list = (await loadMemosYear(memo.y)).filter((x) => x.id !== memo.id);
     await saveMemosYear(memo.y, list);
     if (memo.dueListId) await syncMemoDue(memo, 0);
     setMemoView(null);
     await refreshMemos();
+    showToast("মেমো মুছে ফেলা হয়েছে", { label: "ফিরিয়ে আনুন", fn: () => restoreTrash(tItem) });
   };
 
   async function loadMonthEntries(y, m) {
@@ -1376,9 +2034,10 @@ export default function LedgerApp() {
         th,td{border:1px solid #D9DDEB;padding:6px 10px;font-size:13px;}
         th{background:#1F2F5C;color:#fff;text-align:left;}
         tfoot td{font-weight:bold;background:#E8EBF5;}
+        ${LETTERHEAD_CSS}
       .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}</style>
       </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
-      <h1>R.K ADVERTISING AND DIGITAL HOUSE</h1>
+      ${shopLetterheadHtml()}
       <p class="sub">মাসিক রিপোর্ট — ${MONTH_NAMES[m - 1]}, ${toBn(y)}</p>
       <table>
         <thead><tr><th>তারিখ</th><th>আয়</th><th>খরচ</th><th>অবশিষ্ট</th></tr></thead>
@@ -1501,8 +2160,8 @@ export default function LedgerApp() {
         setMonthEntries(refreshed);
       }
       resetDraft(year || ty, month || tm);
-      if (pendingCount() > 0)
-        window.alert("⚠️ কিছু সেভ এখনো সার্ভারে যায়নি — তবে সব ফোনে জমা আছে, নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হবে। হারাবে না।");
+      if (pendingCount() > 0) window.alert("⚠️ কিছু সেভ এখনো সার্ভারে যায়নি — তবে সব ফোনে জমা আছে, নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হবে। হারাবে না।");
+      else showToast("✓ সেভ হয়েছে");
     } finally {
       setSaving(false);
     }
@@ -1511,17 +2170,71 @@ export default function LedgerApp() {
   const deleteExpenseRow = async (y, m, d, id) => {
     if (!window.confirm("এই খরচের সারিটা মুছে ফেলবেন?")) return;
     const raw = await loadDay(y, m, d);
+    const gone = raw.expenses.find((r) => r.id === id);
+    const tItem = gone ? await addToTrash({ kind: "expense", label: `${gone.name || "খরচ"} — ৳${fmt(numOr0(gone.amount))}`, y, m, d, data: gone }) : null;
     const expensesArr = raw.expenses.filter((r) => isMeaningfulExpense(r) && r.id !== id);
     await recomputeAndSaveDay(y, m, d, { ...raw, expenses: expensesArr });
     if (year && month) setMonthEntries(await loadMonthEntries(year, month));
+    if (tItem) showToast("খরচের সারি মুছে ফেলা হয়েছে", { label: "ফিরিয়ে আনুন", fn: () => restoreTrash(tItem) });
   };
 
   const deleteSaleRow = async (y, m, d, id) => {
     if (!window.confirm("এই বিক্রির সারিটা মুছে ফেলবেন?")) return;
     const raw = await loadDay(y, m, d);
+    const gone = raw.items.find((r) => r.id === id);
+    const tItem = gone ? await addToTrash({ kind: "sale", label: `${gone.name || "বিক্রি"} — ৳${fmt(netTotal(gone))}`, y, m, d, data: gone }) : null;
     const itemsArr = raw.items.filter((r) => isMeaningfulItem(r) && r.id !== id);
     await recomputeAndSaveDay(y, m, d, { ...raw, items: itemsArr });
     if (year && month) setMonthEntries(await loadMonthEntries(year, month));
+    if (tItem) showToast("বিক্রির সারি মুছে ফেলা হয়েছে", { label: "ফিরিয়ে আনুন", fn: () => restoreTrash(tItem) });
+  };
+
+  // মোছা এন্ট্রি ফিরিয়ে আনা
+  const restoreTrash = async (item) => {
+    try {
+      if (item.kind === "sale" || item.kind === "expense") {
+        const raw = await loadDay(item.y, item.m, item.d);
+        if (item.kind === "sale") {
+          const items = [...raw.items.filter(isMeaningfulItem).filter((r) => r.id !== item.data.id), item.data];
+          await recomputeAndSaveDay(item.y, item.m, item.d, { ...raw, items });
+        } else {
+          const expenses = [...raw.expenses.filter(isMeaningfulExpense).filter((r) => r.id !== item.data.id), item.data];
+          await recomputeAndSaveDay(item.y, item.m, item.d, { ...raw, expenses });
+        }
+        if (year && month) setMonthEntries(await loadMonthEntries(year, month));
+      } else if (item.kind === "memo") {
+        const mm = item.data;
+        const list = await loadMemosYear(mm.y);
+        if (!list.some((x) => x.id === mm.id)) list.push(mm);
+        await saveMemosYear(mm.y, list);
+        const calc = memoCalc(mm);
+        if (mm.dueListId && calc.due > 0) await syncMemoDue(mm, calc.due);
+        await refreshMemos();
+      } else if (item.kind === "due") {
+        const e = item.data;
+        const list = await loadManualDues();
+        if (!list.some((x) => x.id === e.id)) list.push(e);
+        await saveManualDues(list);
+        if (e.memoId) {
+          const ml = await loadMemosYear(e.memoY);
+          await saveMemosYear(e.memoY, ml.map((x) => (x.id === e.memoId ? { ...x, dueListId: e.id } : x)));
+        }
+      }
+      const rest = (await loadTrash()).filter((x) => x.tid !== item.tid);
+      await saveTrash(rest);
+      setTrash(rest);
+      setAllDues(await loadAllDuesFlat());
+      showToast("✓ ফিরিয়ে আনা হয়েছে");
+    } catch (err) {
+      window.alert("ফিরিয়ে আনা যায়নি — আবার চেষ্টা করুন।");
+    }
+  };
+
+  const purgeTrash = async (item) => {
+    if (!window.confirm("এটা চিরতরে মুছে যাবে — আর ফেরানো যাবে না। নিশ্চিত?")) return;
+    const rest = (await loadTrash()).filter((x) => x.tid !== item.tid);
+    await saveTrash(rest);
+    setTrash(rest);
   };
 
   // মাসের সব দিনের ডেটা লোড
@@ -1545,13 +2258,15 @@ export default function LedgerApp() {
 
   // সব বছরের বাকির লিস্ট লোড (হোম পেজ + বাকির পেজে)
   useEffect(() => {
-    if (view !== "years" && view !== "dues") return;
+    if (view !== "years" && view !== "dues" && view !== "customers") return;
     let cancelled = false;
     setAllDuesLoading(true);
     (async () => {
-      const flat = await loadAllDuesFlat();
+      const [flat, ml] = await Promise.all([loadAllDuesFlat(), loadAllMemos()]);
+      ml.sort((a, b) => b.y - a.y || b.m - a.m || b.d - a.d || (b.no || 0) - (a.no || 0));
       if (!cancelled) {
         setAllDues(flat);
+        setMemos(ml);
         setAllDuesLoading(false);
       }
     })();
@@ -1590,6 +2305,10 @@ export default function LedgerApp() {
     if (view !== "memos") return;
     setMemoDraft(null);
     setMemoView(null);
+    if (openMemoRef.current) {
+      setMemoView(openMemoRef.current);
+      openMemoRef.current = null;
+    }
     setMemoQuery("");
     refreshMemos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1605,6 +2324,36 @@ export default function LedgerApp() {
       if (!cancelled) {
         setLedgerData(rows);
         setLedgerLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
+
+  // দোকানের তথ্য (লোগো/ঠিকানা/ফোন) লোড
+  useEffect(() => {
+    (async () => {
+      const sInfo = await loadShopInfo();
+      setShop({ ...sInfo });
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (view === "settings") setShopDraft({ ...shop });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  // রিসাইকেল বিন লোড
+  useEffect(() => {
+    if (view !== "trash") return;
+    let cancelled = false;
+    setTrashLoading(true);
+    (async () => {
+      const list = await loadTrash();
+      if (!cancelled) {
+        setTrash(list);
+        setTrashLoading(false);
       }
     })();
     return () => {
@@ -1670,6 +2419,42 @@ export default function LedgerApp() {
           .rk-zoom .rk-brand-title { font-size: 23px !important; }
         }
       `}</style>
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            bottom: 22,
+            transform: "translateX(-50%)",
+            zIndex: 80,
+            background: "#1F2F5C",
+            color: "#FFFFFF",
+            borderRadius: 14,
+            padding: "10px 16px",
+            fontSize: 14,
+            display: "flex",
+            gap: 14,
+            alignItems: "center",
+            boxShadow: "0 6px 20px rgba(31,47,92,0.35)",
+            maxWidth: "92vw",
+            fontFamily: "'Noto Sans Bengali', sans-serif",
+          }}
+        >
+          <span>{toast.msg}</span>
+          {toast.action && (
+            <button
+              onClick={() => {
+                const f = toast.action.fn;
+                setToast(null);
+                f();
+              }}
+              style={{ color: "#FFD27A", fontWeight: 700, whiteSpace: "nowrap" }}
+            >
+              {toast.action.label}
+            </button>
+          )}
+        </div>
+      )}
       <datalist id="sale-name-options">
         {allSaleNames.map((n) => (
           <option key={n} value={n} />
@@ -1694,6 +2479,22 @@ export default function LedgerApp() {
         className="rk-zoom min-h-screen w-full flex flex-col sm:h-[calc(100vh-48px)] sm:max-w-[460px] sm:my-6 sm:rounded-lg sm:shadow-2xl sm:overflow-y-auto lg:max-w-6xl lg:h-screen lg:my-0 lg:rounded-none lg:shadow-none"
         style={{ background: "#F5F6FA", fontFamily: "'Noto Sans Bengali', sans-serif" }}
       >
+        {(!online || pending > 0) && (
+          <div
+            style={{
+              background: online ? "#FFF6E5" : "#FBEAE7",
+              color: online ? "#9A6B1F" : "#B24A45",
+              fontSize: 12,
+              fontWeight: 700,
+              padding: "6px 12px",
+              textAlign: "center",
+            }}
+          >
+            {!online
+              ? `📴 ইন্টারনেট নেই — সেভ ফোনে জমা থাকবে, নেট এলে নিজে পাঠানো হবে${pending ? ` (${toBn(pending)} টা জমা আছে)` : ""}`
+              : `⏳ ${toBn(pending)} টা সেভ সার্ভারে পাঠানো বাকি`}
+          </div>
+        )}
         {/* ---------- YEARS (ড্যাশবোর্ড) ---------- */}
         {view === "years" &&
           (() => {
@@ -1750,7 +2551,10 @@ export default function LedgerApp() {
                       buttonStyle={{ width: 54, height: 54, borderRadius: 17, background: NAVY }}
                       items={[
                         { label: "কাস্টমার মেমো", icon: <FileText size={17} />, onClick: () => setView("memos") },
+                        { label: "কাস্টমারের পুরো হিসাব", icon: <Users size={17} />, onClick: () => { setCustSel(null); setView("customers"); } },
                         { label: "গ্রাহক লেজার / এন্ট্রি খুঁজুন", icon: <Search size={17} />, onClick: () => setView("ledger") },
+                        { label: "রিসাইকেল বিন (মোছা ফেরত)", icon: <RotateCcw size={17} />, onClick: () => setView("trash") },
+                        { label: "দোকানের তথ্য ও লোগো", icon: <Settings size={17} />, onClick: () => setView("settings") },
                         {
                           label: backingUp ? "ব্যাকআপ তৈরি হচ্ছে…" : "ব্যাকআপ ডাউনলোড (CSV)",
                           icon: <Download size={17} />,
@@ -1790,7 +2594,12 @@ export default function LedgerApp() {
                   <div className="text-left">
                     <div style={{ color: NAVY, fontSize: 18, fontWeight: 700 }}>বাকির লিস্ট</div>
                     <div style={{ color: GRAY, fontSize: 13, marginTop: 2 }}>
-                      {allDuesLoading ? "লোড হচ্ছে…" : `${toBn(allDues.length)} টা এন্ট্রি · দেখতে ট্যাপ করুন`}
+                      {allDuesLoading
+                        ? "লোড হচ্ছে…"
+                        : (() => {
+                            const old15n = allDues.filter((e) => daysSince(e.y, e.m, e.d) >= 15).length;
+                            return `${toBn(allDues.length)} টা এন্ট্রি${old15n ? ` · ⚠ ${toBn(old15n)} টা ১৫+ দিনের পুরনো` : " · দেখতে ট্যাপ করুন"}`;
+                          })()}
                     </div>
                   </div>
                   <div style={{ color: "#B24A45", fontSize: 21, fontWeight: 700 }}>
@@ -1867,6 +2676,14 @@ export default function LedgerApp() {
                       style={{ fontSize: 14, border: "1px solid #D9DDEB", background: "#FFFFFF", color: "#B24A45", fontWeight: 600 }}
                     />
                   </div>
+                  <input
+                    value={newDue.phone || ""}
+                    onChange={(ev) => setNewDue((p) => ({ ...p, phone: ev.target.value }))}
+                    inputMode="tel"
+                    placeholder="ফোন নম্বর (রিমাইন্ডার পাঠাতে — ঐচ্ছিক)"
+                    className="w-full mt-2 px-2 py-2 rounded-xl outline-none"
+                    style={{ fontSize: 13.5, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
+                  />
                   <div className="flex items-center gap-2 mt-2">
                     <input
                       type="date"
@@ -1891,99 +2708,193 @@ export default function LedgerApp() {
               ) : allDues.length === 0 ? (
                 <p style={{ fontSize: 12, color: "#6B7390" }}>এখনও কোনো বাকি নেই।</p>
               ) : (
-                <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1F2F5C" }}>
-                  <div className="grid grid-cols-[84px,1fr,70px]" style={{ background: "#1F2F5C" }}>
-                    <Th small>তারিখ</Th>
-                    <Th>নাম</Th>
-                    <Th right>বাকি</Th>
-                  </div>
-                  {allDues.map((e, i) => {
-                    const daysAgo = Math.floor((new Date() - new Date(e.y, e.m - 1, e.d)) / (1000 * 60 * 60 * 24));
-                    const overdue = daysAgo >= 15;
-                    const key = `${e.y}-${e.m}-${e.d}-${e.id}`;
-                    const input = paymentInputs[key] || {};
-                    return (
-                      <div key={i} style={{ borderTop: "1px solid #E8EAF2" }}>
-                        <div
-                          className="grid grid-cols-[84px,1fr,70px] items-center"
-                          style={{
-                            background: overdue ? "#FBEAE7" : "#FFFFFF",
-                            borderLeft: overdue ? "3px solid #B24A45" : "3px solid transparent",
-                          }}
-                        >
-                          <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B7390" }}>
-                            {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
+                (() => {
+                  const custMap = {};
+                  buildCustomers(memos, allDues).forEach((c) => {
+                    custMap[c.key] = c;
+                  });
+                  const withAge = allDues.map((e) => ({ e, days: daysSince(e.y, e.m, e.d) }));
+                  const old7 = withAge.filter((x) => x.days >= 7);
+                  const old15 = withAge.filter((x) => x.days >= 15);
+                  const sumOf = (arr) => arr.reduce((s, x) => s + (x.e.amount || 0), 0);
+                  const shown = withAge.filter((x) => (dueFilter === "old15" ? x.days >= 15 : dueFilter === "old7" ? x.days >= 7 : true));
+                  const chip = (id, label) => (
+                    <button
+                      key={id}
+                      onClick={() => setDueFilter(id)}
+                      className="px-3 py-1.5 rounded-full active:opacity-70"
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: "1px solid #1F2F5C",
+                        background: dueFilter === id ? "#1F2F5C" : "#FFFFFF",
+                        color: dueFilter === id ? "#FFFFFF" : "#1F2F5C",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                  return (
+                    <>
+                      {old15.length > 0 && (
+                        <div className="rounded-xl mb-3 px-3 py-2.5" style={{ background: "#FBEAE7", border: "1px solid #B24A45", color: "#8E2B26" }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                            ⚠ ১৫ দিনের বেশি পুরনো বাকি: {toBn(old15.length)} টা · মোট ৳{toBn(fmt(sumOf(old15)))}
                           </div>
-                          <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#1B2340" }}>
-                            {e.name}
-                            {overdue && (
-                              <span style={{ fontSize: 9.5, color: "#B24A45", marginLeft: 5, fontWeight: 600 }}>
-                                ⚠ {toBn(daysAgo)} দিন
-                              </span>
-                            )}
+                          <div style={{ fontSize: 11.5, marginTop: 2 }}>নিচে WhatsApp / SMS বাটনে চাপ দিয়ে রিমাইন্ডার পাঠান।</div>
+                        </div>
+                      )}
+                      <div className="flex gap-2 mb-3 flex-wrap">
+                        {chip("all", `সব (${toBn(withAge.length)})`)}
+                        {chip("old7", `৭+ দিন (${toBn(old7.length)})`)}
+                        {chip("old15", `১৫+ দিন (${toBn(old15.length)})`)}
+                      </div>
+                      {shown.length === 0 ? (
+                        <p style={{ fontSize: 12, color: "#6B7390" }}>এই ভাগে কোনো বাকি নেই।</p>
+                      ) : (
+                        <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1F2F5C" }}>
+                          <div className="grid grid-cols-[84px,1fr,70px]" style={{ background: "#1F2F5C" }}>
+                            <Th small>তারিখ</Th>
+                            <Th>নাম</Th>
+                            <Th right>বাকি</Th>
                           </div>
-                          <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B24A45" }}>
-                            {fmt(e.amount)}
+                          {shown.map(({ e, days }, i) => {
+                            const stage = days >= 30 ? 3 : days >= 15 ? 2 : days >= 7 ? 1 : 0;
+                            const stBg = ["#FFFFFF", "#FFF6E5", "#FBEAE7", "#F7D9D4"][stage];
+                            const stBorder = ["transparent", "#C97B2E", "#B24A45", "#8E2B26"][stage];
+                            const stColor = stage === 1 ? "#9A6B1F" : "#B24A45";
+                            const key = `${e.y}-${e.m}-${e.d}-${e.id}`;
+                            const input = paymentInputs[key] || {};
+                            const phone = phoneOf(e.name, e);
+                            const cust = custMap[custKey(e.name)];
+                            const open = openDue === key || stage >= 1;
+                            return (
+                              <div key={i} style={{ borderTop: "1px solid #E8EAF2" }}>
+                                <div
+                                  onClick={() => setOpenDue(openDue === key ? null : key)}
+                                  className="grid grid-cols-[84px,1fr,70px] items-center"
+                                  style={{ background: stBg, borderLeft: `3px solid ${stBorder}`, cursor: "pointer" }}
+                                >
+                                  <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "#6B7390" }}>
+                                    {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
+                                  </div>
+                                  <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "#1B2340" }}>
+                                    {e.name}
+                                    {stage >= 1 && (
+                                      <span style={{ fontSize: 9.5, color: stColor, marginLeft: 5, fontWeight: 700 }}>
+                                        {stage === 1 ? "⏰" : stage === 2 ? "⚠" : "⚠⚠"} {toBn(days)} দিন
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "#B24A45" }}>
+                                    {fmt(e.amount)}
+                                  </div>
+                                </div>
+                                {open && (
+                                  <div
+                                    className="flex items-center gap-1.5 px-2 py-1.5 flex-wrap"
+                                    style={{ background: stBg, borderLeft: `3px solid ${stBorder}`, borderTop: "1px dashed #E8EAF2" }}
+                                  >
+                                    <button
+                                      onClick={() => openWhatsApp(phone, dueMessage(e.name, e.amount, e.y, e.m, e.d))}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70"
+                                      style={{ background: "#E3F4EA", color: "#1E7A47", fontSize: 11.5, fontWeight: 700 }}
+                                    >
+                                      <MessageCircle size={12} /> WhatsApp
+                                    </button>
+                                    <button
+                                      onClick={() => openSms(phone, dueMessage(e.name, e.amount, e.y, e.m, e.d))}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70"
+                                      style={{ background: "#E8EBF5", color: "#1F2F5C", fontSize: 11.5, fontWeight: 700 }}
+                                    >
+                                      <MessageSquare size={12} /> SMS
+                                    </button>
+                                    {phone && (
+                                      <button
+                                        onClick={() => openCall(phone)}
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70"
+                                        style={{ background: "#E8EBF5", color: "#1F2F5C", fontSize: 11.5, fontWeight: 700 }}
+                                      >
+                                        <Phone size={12} /> কল
+                                      </button>
+                                    )}
+                                    {cust && (
+                                      <button
+                                        onClick={() => {
+                                          setCustSel(cust.key);
+                                          setView("customers");
+                                        }}
+                                        className="px-2.5 py-1 rounded-full active:opacity-70"
+                                        style={{ border: "1px solid #1F2F5C", color: "#1F2F5C", fontSize: 11.5, fontWeight: 700 }}
+                                      >
+                                        পুরো হিসাব ›
+                                      </button>
+                                    )}
+                                    <span style={{ fontSize: 10.5, color: "#6B7390" }}>{phone ? phone : "ফোন নম্বর নেই"}</span>
+                                  </div>
+                                )}
+                                {editMode && (
+                                  <div
+                                    className="flex items-center gap-1.5 px-2 py-1.5"
+                                    style={{ background: "#F5F6FA", borderTop: "1px dashed #D9DDEB" }}
+                                  >
+                                    <span style={{ fontSize: 10.5, color: "#1F2F5C", fontWeight: 600, whiteSpace: "nowrap" }}>পরিশোধ:</span>
+                                    <input
+                                      value={input.amount || ""}
+                                      onChange={(ev) =>
+                                        setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], amount: ev.target.value } }))
+                                      }
+                                      inputMode="decimal"
+                                      placeholder="টাকা"
+                                      className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
+                                      style={{ width: 64, fontSize: 11, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
+                                    />
+                                    <input
+                                      type="date"
+                                      value={input.date || todayInputValue()}
+                                      onChange={(ev) =>
+                                        setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], date: ev.target.value } }))
+                                      }
+                                      className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
+                                      style={{ fontSize: 10.5, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
+                                    />
+                                    <button
+                                      onClick={() => handleSettlePayment(e, key)}
+                                      disabled={payingKey !== null || !num(input.amount) || num(input.amount) <= 0}
+                                      className="px-2.5 py-1 rounded-xl active:opacity-70 ml-auto"
+                                      style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}
+                                    >
+                                      {payingKey === key ? "…" : "জমা করুন"}
+                                    </button>
+                                    {e.manual && (
+                                      <button
+                                        onClick={() => handleDeleteManualDue(e)}
+                                        className="p-1 active:opacity-60"
+                                        style={{ color: "#B24A45" }}
+                                        aria-label="এই বাকি মুছুন"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <div className="grid grid-cols-[84px,1fr,70px] items-center" style={{ borderTop: "1px solid #1F2F5C", background: "#E8EBF5" }}>
+                            <div />
+                            <div className="px-2 py-1.5" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 13, color: "#1F2F5C" }}>
+                              {dueFilter === "all" ? "মোট বাকি" : "এই ভাগের মোট"}
+                            </div>
+                            <div className="px-2 py-1.5 text-right" style={{ fontSize: 13.5, fontWeight: 700, color: "#1F2F5C" }}>
+                              {fmt(sumOf(shown))}
+                            </div>
                           </div>
                         </div>
-                        {editMode && (
-                          <div
-                            className="flex items-center gap-1.5 px-2 py-1.5"
-                            style={{ background: "#F5F6FA", borderTop: "1px dashed #D9DDEB" }}
-                          >
-                            <span style={{ fontSize: 10.5, color: "#1F2F5C", fontWeight: 600, whiteSpace: "nowrap" }}>পরিশোধ:</span>
-                            <input
-                              value={input.amount || ""}
-                              onChange={(ev) =>
-                                setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], amount: ev.target.value } }))
-                              }
-                              inputMode="decimal"
-                              placeholder="টাকা"
-                              className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
-                              style={{ width: 64, fontSize: 11, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
-                            />
-                            <input
-                              type="date"
-                              value={input.date || todayInputValue()}
-                              onChange={(ev) =>
-                                setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], date: ev.target.value } }))
-                              }
-                              className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
-                              style={{ fontSize: 10.5, border: "1px solid #D9DDEB", background: "#FFFFFF" }}
-                            />
-                            <button
-                              onClick={() => handleSettlePayment(e, key)}
-                              disabled={payingKey !== null || !num(input.amount) || num(input.amount) <= 0}
-                              className="px-2.5 py-1 rounded-xl active:opacity-70 ml-auto"
-                              style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}
-                            >
-                              {payingKey === key ? "…" : "জমা করুন"}
-                            </button>
-                            {e.manual && (
-                              <button
-                                onClick={() => handleDeleteManualDue(e)}
-                                className="p-1 active:opacity-60"
-                                style={{ color: "#B24A45" }}
-                                aria-label="এই বাকি মুছুন"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <div className="grid grid-cols-[84px,1fr,70px] items-center" style={{ borderTop: "1px solid #1F2F5C", background: "#E8EBF5" }}>
-                    <div />
-                    <div className="px-2 py-1.5" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 13, color: "#1F2F5C" }}>
-                      মোট বাকি
-                    </div>
-                    <div className="px-2 py-1.5 text-right" style={{ fontSize: 13.5, fontWeight: 700, color: "#1F2F5C" }}>
-                      {fmt(allDues.reduce((s, e) => s + (e.amount || 0), 0))}
-                    </div>
-                  </div>
-                </div>
+                      )}
+                    </>
+                  );
+                })()
               )}
             </div>
           </>
@@ -2288,6 +3199,34 @@ export default function LedgerApp() {
 
                     <div className="flex gap-2 mt-4">
                       <button
+                        onClick={() => handleSharePdf(memoToDoc(mm), `memo-${mm.no}.pdf`, `${getShop().name} — মেমো নং ${toBn(mm.no)}`)}
+                        disabled={sharing}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl active:opacity-80"
+                        style={{ background: "#1E7A47", color: "#FFFFFF", fontSize: 13.5, fontWeight: 600, opacity: sharing ? 0.6 : 1 }}
+                      >
+                        <Share2 size={15} /> {sharing ? "তৈরি হচ্ছে…" : "PDF শেয়ার (WhatsApp)"}
+                      </button>
+                      <button
+                        onClick={() => openWhatsApp(mm.phone, memoText(mm))}
+                        className="flex items-center justify-center gap-1 px-3 py-2.5 rounded-xl active:opacity-70"
+                        style={{ border: "1px solid #1E7A47", color: "#1E7A47", fontSize: 13 }}
+                      >
+                        <MessageCircle size={14} /> লেখা
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCustSel(custKey(mm.customer));
+                          setView("customers");
+                        }}
+                        className="flex items-center justify-center gap-1 px-3 py-2.5 rounded-xl active:opacity-70"
+                        style={{ border: "1px solid #1F2F5C", color: "#1F2F5C", fontSize: 13 }}
+                      >
+                        <Users size={14} /> পুরো হিসাব
+                      </button>
+                    </div>
+
+                    <div className="flex gap-2 mt-4">
+                      <button
                         onClick={() => printCustomerMemo(mm)}
                         className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl active:opacity-80"
                         style={{ background: "#1F2F5C", color: "#F5F6FA", fontSize: 13.5, fontWeight: 600 }}
@@ -2403,18 +3342,47 @@ export default function LedgerApp() {
               <input
                 value={ledgerQuery}
                 onChange={(e) => setLedgerQuery(e.target.value)}
-                placeholder="নাম দিয়ে খুঁজুন…"
-                className="w-full px-3 py-2 rounded-xl outline-none mb-3"
+                placeholder="নাম / তারিখ (১২ মার্চ, ১২/৩) / টাকা দিয়ে খুঁজুন…"
+                className="w-full px-3 py-2 rounded-xl outline-none mb-2"
                 style={{ border: "1px solid #D9DDEB", background: "#FFFFFF", fontSize: 13.5 }}
               />
+              {ledgerQuery.trim() && (
+                <div className="flex gap-2 mb-3">
+                  {[["all", "সব"], ["বিক্রি", "বিক্রি"], ["খরচ", "খরচ"]].map(([id, label]) => (
+                    <button
+                      key={id}
+                      onClick={() => setLedgerType(id)}
+                      className="px-3 py-1 rounded-full active:opacity-70"
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: "1px solid #1F2F5C",
+                        background: ledgerType === id ? "#1F2F5C" : "#FFFFFF",
+                        color: ledgerType === id ? "#FFFFFF" : "#1F2F5C",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {ledgerLoading ? (
                 <p style={{ fontSize: 12, color: "#6B7390" }}>লোড হচ্ছে…</p>
               ) : ledgerQuery.trim() ? (
                 (() => {
                   const q = ledgerQuery.trim().toLowerCase();
+                  const dateText = (r) =>
+                    `${r.d} ${toBn(r.d)} ${MONTH_NAMES[r.m - 1]} ${r.y} ${toBn(r.y)} ${r.d}/${r.m}/${r.y} ${r.d}/${r.m} ${toBn(r.d)}/${toBn(r.m)} ${pad2(r.d)}-${pad2(r.m)}-${r.y} ${r.y}-${pad2(r.m)}-${pad2(r.d)}`.toLowerCase();
                   const matches = ledgerData
-                    .filter((r) => r.name.toLowerCase().includes(q))
+                    .filter((r) => ledgerType === "all" || r.type === ledgerType)
+                    .filter(
+                      (r) =>
+                        r.name.toLowerCase().includes(q) ||
+                        String(r.amount).includes(q) ||
+                        toBn(String(r.amount)).includes(q) ||
+                        dateText(r).includes(q)
+                    )
                     .sort((a, b) => b.y - a.y || b.m - a.m || b.d - a.d);
                   if (matches.length === 0) return <p style={{ fontSize: 12, color: "#6B7390" }}>কোনো এন্ট্রি পাওয়া যায়নি।</p>;
                   return (
@@ -2428,8 +3396,13 @@ export default function LedgerApp() {
                       {matches.map((r, i) => (
                         <div
                           key={i}
+                          onClick={() => {
+                            setYear(r.y);
+                            setMonth(r.m);
+                            setView("days");
+                          }}
                           className="grid grid-cols-[70px,1fr,54px,70px] items-center"
-                          style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF" }}
+                          style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: "pointer" }}
                         >
                           <div className="px-2 py-1.5" style={{ fontSize: 11, color: "#6B7390" }}>
                             {toBn(r.d)} {MONTH_NAMES[r.m - 1].slice(0, 3)} {toBn(r.y)}
@@ -2485,6 +3458,320 @@ export default function LedgerApp() {
                   );
                 })()
               )}
+            </div>
+          </>
+        )}
+
+        {/* ---------- CUSTOMERS (কাস্টমারভিত্তিক পুরো হিসাব) ---------- */}
+        {view === "customers" &&
+          (() => {
+            const NAVY = "#1F2F5C";
+            const GRAY = "#6B7390";
+            const custs = buildCustomers(memos, allDues);
+            const sel = custSel ? custs.find((c) => c.key === custSel) : null;
+            const tile = (label, value, color) => (
+              <div className="rounded-xl px-2 py-2.5 text-center" style={{ background: "#FFFFFF", border: "1px solid #D9DDEB" }}>
+                <div style={{ fontSize: 11, color: GRAY }}>{label}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 2 }}>৳{toBn(fmt(value))}</div>
+              </div>
+            );
+            const pill = (icon, label, onClick, bg, fg, disabled) => (
+              <button
+                onClick={onClick}
+                disabled={disabled}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl active:opacity-70"
+                style={{ background: bg, color: fg, fontSize: 12.5, fontWeight: 700, opacity: disabled ? 0.6 : 1 }}
+              >
+                {icon} {label}
+              </button>
+            );
+            return (
+              <>
+                <HeaderBar
+                  title={sel ? sel.name : "কাস্টমারের হিসাব"}
+                  onBack={() => (custSel ? setCustSel(null) : setView("years"))}
+                  editMode={editMode}
+                  onToggleMode={toggleEditMode}
+                />
+                <div className="px-3 pt-4 pb-10">
+                  {allDuesLoading ? (
+                    <p style={{ fontSize: 12, color: GRAY }}>লোড হচ্ছে…</p>
+                  ) : sel ? (
+                    (() => {
+                      const rows = customerRows(sel);
+                      const msg = dueMessageTotal(sel.name, sel.due);
+                      return (
+                        <>
+                          <div className="rounded-xl px-4 py-3 mb-3" style={{ background: "#FFFFFF", border: "1px solid #D9DDEB" }}>
+                            <div style={{ fontSize: 17, fontWeight: 700, color: NAVY }}>{sel.name}</div>
+                            <div style={{ fontSize: 13, color: GRAY, marginTop: 2 }}>
+                              {sel.phone ? `📞 ${sel.phone}` : "ফোন নম্বর নেই — মেমোতে ফোন দিলে এখানে আসবে"}
+                            </div>
+                            {sel.address && <div style={{ fontSize: 13, color: GRAY }}>📍 {sel.address}</div>}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            {tile("মোট বিল", sel.billed, NAVY)}
+                            {tile("মোট জমা", sel.paid, "#3E7D5A")}
+                            {tile("বর্তমান বাকি", sel.due, "#B24A45")}
+                          </div>
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {sel.due > 0 &&
+                              pill(<MessageCircle size={14} />, "WhatsApp রিমাইন্ডার", () => openWhatsApp(sel.phone, msg), "#E3F4EA", "#1E7A47")}
+                            {sel.due > 0 && pill(<MessageSquare size={14} />, "SMS", () => openSms(sel.phone, msg), "#E8EBF5", NAVY)}
+                            {sel.phone && pill(<Phone size={14} />, "কল", () => openCall(sel.phone), "#E8EBF5", NAVY)}
+                            {pill(<Printer size={14} />, "প্রিন্ট", () => printCustomerStatement(sel), NAVY, "#FFFFFF")}
+                            {pill(
+                              <Share2 size={14} />,
+                              sharing ? "তৈরি হচ্ছে…" : "PDF শেয়ার",
+                              () => handleSharePdf(statementToDoc(sel), "hisab-bibaroni.pdf", `${sel.name} — হিসাবের বিবরণী`),
+                              NAVY,
+                              "#FFFFFF",
+                              sharing
+                            )}
+                          </div>
+                          {rows.length === 0 ? (
+                            <p style={{ fontSize: 12, color: GRAY }}>এই কাস্টমারের কোনো লেনদেন নেই।</p>
+                          ) : (
+                            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #1F2F5C" }}>
+                              <div className="grid grid-cols-[66px,1fr,58px,58px,58px]" style={{ background: "#1F2F5C" }}>
+                                <Th small>তারিখ</Th>
+                                <Th>বিবরণ</Th>
+                                <Th right>মোট</Th>
+                                <Th right>জমা</Th>
+                                <Th right>বাকি</Th>
+                              </div>
+                              {rows.map((r, i) => (
+                                <div
+                                  key={i}
+                                  onClick={
+                                    r.kind === "memo"
+                                      ? () => {
+                                          openMemoRef.current = r.mm;
+                                          setView("memos");
+                                        }
+                                      : undefined
+                                  }
+                                  className="grid grid-cols-[66px,1fr,58px,58px,58px] items-center"
+                                  style={{ borderTop: "1px solid #E8EAF2", background: "#FFFFFF", cursor: r.kind === "memo" ? "pointer" : "default" }}
+                                >
+                                  <div className="px-1 py-1.5" style={{ fontSize: 10.5, color: GRAY }}>
+                                    {toBn(r.d)} {MONTH_NAMES[r.m - 1].slice(0, 3)} {toBn(r.y)}
+                                  </div>
+                                  <div className="px-2 py-1.5 truncate" style={{ fontSize: 12, color: "#1B2340" }}>
+                                    {r.label}
+                                    {r.kind === "memo" && <span style={{ color: NAVY }}> ›</span>}
+                                  </div>
+                                  <div className="px-1 py-1.5 text-right" style={{ fontSize: 11.5 }}>{fmt(r.total)}</div>
+                                  <div className="px-1 py-1.5 text-right" style={{ fontSize: 11.5, color: "#3E7D5A" }}>{r.paid ? fmt(r.paid) : "—"}</div>
+                                  <div className="px-1 py-1.5 text-right" style={{ fontSize: 11.5, fontWeight: 700, color: r.due > 0 ? "#B24A45" : GRAY }}>
+                                    {fmt(r.due)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    (() => {
+                      const q = custQuery.trim().toLowerCase();
+                      const list = custs
+                        .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.phone || "").includes(q))
+                        .sort((a, b) => b.due - a.due || b.lastVal - a.lastVal);
+                      return (
+                        <>
+                          <input
+                            value={custQuery}
+                            onChange={(e) => setCustQuery(e.target.value)}
+                            placeholder="কাস্টমারের নাম / ফোন দিয়ে খুঁজুন…"
+                            className="w-full px-3 py-2 rounded-xl outline-none mb-2"
+                            style={{ border: "1px solid #D9DDEB", background: "#FFFFFF", fontSize: 13.5 }}
+                          />
+                          <p style={{ fontSize: 12, color: GRAY, marginBottom: 10 }}>
+                            মোট {toBn(custs.length)} জন · মোট বাকি ৳{toBn(fmt(custs.reduce((s, c) => s + c.due, 0)))} (বেশি বাকি আগে)
+                          </p>
+                          {list.length === 0 ? (
+                            <p style={{ fontSize: 12, color: GRAY }}>
+                              {custs.length === 0 ? "এখনও কোনো কাস্টমার নেই — কাস্টমার মেমো বানালে এখানে আসবে।" : "কাউকে পাওয়া যায়নি।"}
+                            </p>
+                          ) : (
+                            <div className="flex flex-col gap-2">
+                              {list.map((c) => (
+                                <button
+                                  key={c.key}
+                                  onClick={() => setCustSel(c.key)}
+                                  className="w-full text-left rounded-xl px-3 py-2.5 active:opacity-80"
+                                  style={{ border: "1px solid #D9DDEB", background: "#FFFFFF" }}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span style={{ fontSize: 15, color: "#1B2340", fontWeight: 600 }}>{c.name}</span>
+                                    {c.due > 0 ? (
+                                      <span style={{ fontSize: 14.5, fontWeight: 700, color: "#B24A45" }}>বাকি ৳{toBn(fmt(c.due))}</span>
+                                    ) : (
+                                      <span style={{ fontSize: 12, color: "#3E7D5A", fontWeight: 600 }}>বাকি নেই</span>
+                                    )}
+                                  </div>
+                                  <div className="mt-1" style={{ fontSize: 11, color: GRAY }}>
+                                    {toBn(c.memos.length)} টা মেমো · বিল ৳{toBn(fmt(c.billed))} · জমা ৳{toBn(fmt(c.paid))}
+                                    {c.phone ? ` · ${c.phone}` : ""}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()
+                  )}
+                </div>
+              </>
+            );
+          })()}
+
+        {/* ---------- TRASH (রিসাইকেল বিন) ---------- */}
+        {view === "trash" && (
+          <>
+            <HeaderBar title="রিসাইকেল বিন" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
+            <div className="px-3 pt-4 pb-10">
+              <p style={{ fontSize: 12, color: "#6B7390", marginBottom: 10 }}>
+                মুছে ফেলা বিক্রি, খরচ, মেমো ও বাকি ৩০ দিন এখানে থাকে। {editMode ? "" : "ফিরিয়ে আনতে এডিট মোড চালু করুন।"}
+              </p>
+              {trashLoading ? (
+                <p style={{ fontSize: 12, color: "#6B7390" }}>লোড হচ্ছে…</p>
+              ) : trash.length === 0 ? (
+                <p style={{ fontSize: 12, color: "#6B7390" }}>বিন খালি — কিছু মোছা হয়নি।</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {trash.map((t) => {
+                    const when = new Date(t.at);
+                    const kindLabel = { sale: "বিক্রি", expense: "খরচ", memo: "মেমো", due: "বাকি" }[t.kind] || t.kind;
+                    return (
+                      <div key={t.tid} className="rounded-xl px-3 py-2.5" style={{ border: "1px solid #D9DDEB", background: "#FFFFFF" }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate" style={{ fontSize: 14, color: "#1B2340", fontWeight: 600 }}>
+                            <span style={{ fontSize: 10.5, color: "#1F2F5C", background: "#E8EBF5", borderRadius: 8, padding: "1px 7px", marginRight: 6 }}>
+                              {kindLabel}
+                            </span>
+                            {t.label}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#6B7390", marginTop: 3 }}>
+                          মোছা হয়েছে {toBn(when.getDate())} {MONTH_NAMES[when.getMonth()]}
+                          {t.y ? ` · হিসাবের তারিখ ${toBn(t.d)} ${MONTH_NAMES[t.m - 1].slice(0, 3)} ${toBn(t.y)}` : ""}
+                        </div>
+                        {editMode && (
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              onClick={() => restoreTrash(t)}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl active:opacity-70"
+                              style={{ background: "#1F2F5C", color: "#FFFFFF", fontSize: 12.5, fontWeight: 700 }}
+                            >
+                              <RotateCcw size={13} /> ফিরিয়ে আনুন
+                            </button>
+                            <button
+                              onClick={() => purgeTrash(t)}
+                              className="px-3 py-1.5 rounded-xl active:opacity-70"
+                              style={{ border: "1px solid #B24A45", color: "#B24A45", fontSize: 12.5 }}
+                            >
+                              চিরতরে মুছুন
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ---------- SETTINGS (দোকানের তথ্য ও লোগো) ---------- */}
+        {view === "settings" && shopDraft && (
+          <>
+            <HeaderBar title="দোকানের তথ্য ও লোগো" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
+            <div className="px-3 pt-4 pb-10">
+              {!editMode && (
+                <div className="mb-3 px-3 py-2 rounded-xl flex items-center gap-2" style={{ background: "#E8EBF5", color: "#1F2F5C", fontSize: 12 }}>
+                  <Eye size={13} /> ভিউ মোড — বদলাতে উপরের বাটনে চাপ দিয়ে এডিট মোড চালু করুন
+                </div>
+              )}
+              <p style={{ fontSize: 12, color: "#6B7390", marginBottom: 10 }}>
+                এই তথ্য মেমো, মাসিক রিপোর্ট, হিসাবের বিবরণী ও PDF-এর মাথায় বসবে।
+              </p>
+              <div className="rounded-xl px-3 py-3 mb-3 flex items-center gap-3" style={{ background: "#FFFFFF", border: "1px solid #D9DDEB" }}>
+                <div
+                  className="flex items-center justify-center shrink-0"
+                  style={{ width: 72, height: 72, borderRadius: 14, border: "1px dashed #AEB5CE", background: "#F5F6FA", overflow: "hidden" }}
+                >
+                  {shopDraft.logo ? (
+                    <img src={shopDraft.logo} alt="লোগো" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#6B7390" }}>লোগো নেই</span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label
+                    className="px-3 py-1.5 rounded-xl text-center"
+                    style={{ background: editMode ? "#1F2F5C" : "#AEB5CE", color: "#FFFFFF", fontSize: 12.5, fontWeight: 700, cursor: editMode ? "pointer" : "not-allowed" }}
+                  >
+                    {shopDraft.logo ? "লোগো বদলান" : "লোগো আপলোড"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={!editMode}
+                      style={{ display: "none" }}
+                      onChange={async (ev) => {
+                        const f = ev.target.files && ev.target.files[0];
+                        ev.target.value = "";
+                        if (!f) return;
+                        try {
+                          const url = await resizeImageToDataUrl(f);
+                          setShopDraft((p) => ({ ...p, logo: url }));
+                        } catch (err) {
+                          window.alert("ছবিটা পড়া যায়নি — অন্য ছবি দিয়ে চেষ্টা করুন।");
+                        }
+                      }}
+                    />
+                  </label>
+                  {shopDraft.logo && editMode && (
+                    <button onClick={() => setShopDraft((p) => ({ ...p, logo: "" }))} style={{ fontSize: 12, color: "#B24A45" }}>
+                      লোগো সরান
+                    </button>
+                  )}
+                </div>
+              </div>
+              {[
+                ["name", "দোকানের নাম"],
+                ["address", "ঠিকানা"],
+                ["phone", "ফোন নম্বর"],
+              ].map(([f, label]) => (
+                <div key={f} className="mb-3">
+                  <div style={{ fontSize: 12, color: "#6B7390", marginBottom: 4 }}>{label}</div>
+                  <input
+                    value={shopDraft[f] || ""}
+                    onChange={(ev) => setShopDraft((p) => ({ ...p, [f]: ev.target.value }))}
+                    disabled={!editMode}
+                    className="w-full px-3 py-2 rounded-xl outline-none"
+                    style={{ border: "1px solid #D9DDEB", background: editMode ? "#FFFFFF" : "#F5F6FA", fontSize: 14 }}
+                  />
+                </div>
+              ))}
+              <button
+                onClick={async () => {
+                  if (!editMode) return;
+                  const ok = await saveShopInfo({ ...shopDraft, name: (shopDraft.name || "").trim() || DEFAULT_SHOP.name });
+                  setShop(getShop());
+                  if (ok) showToast("✓ দোকানের তথ্য সেভ হয়েছে");
+                  else window.alert("সার্ভারে সেভ হয়নি, তবে ফোনে জমা আছে — নেট এলে নিজে থেকে যাবে।");
+                }}
+                disabled={!editMode}
+                className="w-full py-3 rounded-xl active:opacity-80"
+                style={{ background: editMode ? "#1F2F5C" : "#AEB5CE", color: "#FFFFFF", fontSize: 14, fontWeight: 700 }}
+              >
+                সেভ করুন
+              </button>
             </div>
           </>
         )}
