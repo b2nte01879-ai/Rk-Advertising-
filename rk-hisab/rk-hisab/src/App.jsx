@@ -2292,6 +2292,7 @@ export default function LedgerApp() {
     setDraftYear(y);
     setDraftMonth(m);
     setDraftDay(d);
+    setSaleSheetOpen(true);
     setExpenseDrafts([{ id: row.id, name: row.name, amount: row.amount }]);
     setEditingExpenseOrigin({ y, m, d, id: row.id });
   };
@@ -2686,7 +2687,7 @@ export default function LedgerApp() {
           {!saleSheetOpen && (
             <button
               onClick={() => setSaleSheetOpen(true)}
-              aria-label="বিক্রির ফর্ম খুলুন"
+              aria-label="বিক্রি ও খরচের ফর্ম খুলুন"
               className="fixed flex items-center gap-2 active:opacity-80"
               style={{
                 zIndex: 60,
@@ -2702,10 +2703,10 @@ export default function LedgerApp() {
                 fontFamily: "'Noto Sans Bengali', sans-serif",
               }}
             >
-              <ShoppingBag size={20} /> বিক্রি
-              {saleDrafts.filter(isMeaningfulItem).length > 0 && (
+              <ShoppingBag size={20} /> বিক্রি / খরচ
+              {(saleDrafts.filter(isMeaningfulItem).length + expenseDrafts.filter(isMeaningfulExpense).length) > 0 && (
                 <span style={{ background: "var(--orange-bg)", color: "#FFFFFF", borderRadius: 999, minWidth: 22, height: 22, fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 6px" }}>
-                  {toBn(saleDrafts.filter(isMeaningfulItem).length)}
+                  {toBn((saleDrafts.filter(isMeaningfulItem).length + expenseDrafts.filter(isMeaningfulExpense).length))}
                 </span>
               )}
             </button>
@@ -2720,11 +2721,11 @@ export default function LedgerApp() {
             >
               <div
                 className="w-full flex flex-col rounded-t-2xl sm:rounded-2xl"
-                style={{ maxWidth: 900, maxHeight: "92vh", background: "var(--bg)", border: "2.5px solid var(--navy-line)", fontFamily: "'Noto Sans Bengali', sans-serif" }}
+                style={{ maxWidth: 1100, maxHeight: "94vh", background: "var(--bg)", border: "2.5px solid var(--navy-line)", fontFamily: "'Noto Sans Bengali', sans-serif" }}
               >
                 <div className="flex items-center justify-between px-4 pt-3 pb-2">
                   <div>
-                    <div style={{ fontSize: 17, fontWeight: 800, color: "var(--navy-fg)" }}>বিক্রির ফর্ম</div>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: "var(--navy-fg)" }}>বিক্রি ও খরচ</div>
                     <div style={{ fontSize: 12, color: "var(--gray)" }}>
                       {toBn(draftDay)} {MONTH_NAMES[draftMonth - 1]}, {toBn(draftYear)}
                     </div>
@@ -2738,7 +2739,49 @@ export default function LedgerApp() {
                     ✕
                   </button>
                 </div>
-                <div className="px-3 pb-3 overflow-y-auto">
+                <div className="overflow-y-auto pb-2">
+                <div className="flex items-center justify-center gap-2 px-3 pt-3 pb-2">
+                  <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "var(--navy-fg)" }}>তারিখ</span>
+                  <select
+                    value={draftDay}
+                    onChange={(e) => setDraftDay(Number(e.target.value))}
+                    className="rounded-xl"
+                    style={{ fontSize: 14, fontWeight: 800, color: "var(--navy-fg)", background: "var(--card)", border: "2px solid var(--navy-line)", padding: "4px 5px" }}
+                  >
+                    {Array.from({ length: daysInMonth(draftYear, draftMonth) }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>
+                        {toBn(d)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={draftMonth}
+                    onChange={(e) => setDraftMonth(Number(e.target.value))}
+                    className="rounded-xl"
+                    style={{ fontSize: 14, fontWeight: 800, color: "var(--navy-fg)", background: "var(--card)", border: "2px solid var(--navy-line)", padding: "4px 5px" }}
+                  >
+                    {MONTH_NAMES.map((mn, i) => (
+                      <option key={mn} value={i + 1}>
+                        {mn}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={draftYear}
+                    onChange={(e) => setDraftYear(Number(e.target.value))}
+                    className="rounded-xl"
+                    style={{ fontSize: 14, fontWeight: 800, color: "var(--navy-fg)", background: "var(--card)", border: "2px solid var(--navy-line)", padding: "4px 5px" }}
+                  >
+                    {YEARS.map((y) => (
+                      <option key={y} value={y}>
+                        {toBn(y)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                  <div className="flex flex-col lg:flex-row">
+                    <div className="px-3 lg:w-[68%]">
+                      <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "var(--navy-fg)", margin: "4px 0" }}>বিক্রি</p>
                   <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--line)" }}>
                     <div className="overflow-x-auto">
                       <div
@@ -2832,14 +2875,69 @@ export default function LedgerApp() {
                   >
                     <Plus size={15} /> বিক্রি যোগ করুন
                   </button>
+                    </div>
+                  <div className="px-3 mt-3 lg:mt-0 lg:w-[32%]">
+                    <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "var(--navy-fg)", margin: "4px 0" }}>খরচ</p>
+                    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--line)" }}>
+                      <div className="grid" style={{ gridTemplateColumns: "1fr 70px 24px", background: "var(--navy-bg)" }}>
+                        <Th>বিবরণ</Th>
+                        <Th right>টাকা</Th>
+                        <Th />
+                      </div>
+                      {expenseDrafts.map((row, idx) => (
+                        <div
+                          key={idx}
+                          className="grid items-center"
+                          style={{ gridTemplateColumns: "1fr 70px 24px", background: "var(--card)", borderTop: idx > 0 ? "1px solid var(--line2)" : "none" }}
+                        >
+                          <NameInput
+                            value={row.name}
+                            onValue={(v) => updateExpenseDraft(idx, "name", v)}
+                            names={allExpenseNames}
+                            customNames={customExpenseNames}
+                            onAdd={async (nm) => {
+                              const n = await addPresetName("expense", nm);
+                              if (n) updateExpenseDraft(idx, "name", n);
+                            }}
+                            onRemove={(n) => removePresetName("expense", n)}
+                            placeholder="যেমন: নাস্তা"
+                            inputClass="px-2 py-2"
+                            inputStyle={{ fontSize: 15, color: "var(--ink)" }}
+                          />
+                          <input
+                            value={row.amount}
+                            onChange={(e) => updateExpenseDraft(idx, "amount", e.target.value)}
+                            inputMode="decimal"
+                            placeholder="0"
+                            className="min-w-0 w-full px-1 py-2 bg-transparent outline-none text-right"
+                            style={{ fontSize: 15, color: "var(--ink)" }}
+                          />
+                          <button onClick={() => removeExpenseDraftRow(idx)} className="flex items-center justify-center h-full" style={{ color: "var(--red)" }}>
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setExpenseDrafts((rows) => [...rows, emptyExpenseDraft()])}
+                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-xl active:opacity-70"
+                      style={{ background: "var(--bg)", color: "var(--navy-fg)", fontSize: 14, border: "1px dashed var(--line)" }}
+                    >
+                      <Plus size={15} /> খরচ যোগ করুন
+                    </button>
+                  </div>
+                  </div>
                 </div>
                 <div className="px-3 py-3 flex gap-2" style={{ borderTop: "1px solid var(--line)" }}>
                   <button
-                    onClick={() => setSaleSheetOpen(false)}
+                    onClick={() => {
+                      resetDraft(draftYear, draftMonth);
+                      setSaleSheetOpen(false);
+                    }}
                     className="px-4 py-2.5 rounded-xl active:opacity-70"
                     style={{ border: "1px solid var(--navy-line)", color: "var(--navy-fg)", fontSize: 13.5, fontWeight: 600 }}
                   >
-                    ঠিক আছে
+                    বাতিল
                   </button>
                   <button
                     onClick={async () => {
@@ -4252,123 +4350,6 @@ export default function LedgerApp() {
             )}
 
             <div className="px-3 pt-3">
-              {/* ---- ড্রাফট প্যানেল: শুধু এডিট মোডে দেখায় ---- */}
-              {editMode && (
-              <div className="rounded-xl mb-5" style={{ border: "2.5px solid var(--navy-line)", background: "var(--bg)" }}>
-                <div className="flex items-center justify-center gap-2 px-3 pt-3 pb-2">
-                  <span style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "var(--navy-fg)" }}>তারিখ</span>
-                  <select
-                    value={draftDay}
-                    onChange={(e) => setDraftDay(Number(e.target.value))}
-                    className="rounded-xl"
-                    style={{ fontSize: 14, fontWeight: 800, color: "var(--navy-fg)", background: "var(--card)", border: "2px solid var(--navy-line)", padding: "4px 5px" }}
-                  >
-                    {Array.from({ length: daysInMonth(draftYear, draftMonth) }, (_, i) => i + 1).map((d) => (
-                      <option key={d} value={d}>
-                        {toBn(d)}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={draftMonth}
-                    onChange={(e) => setDraftMonth(Number(e.target.value))}
-                    className="rounded-xl"
-                    style={{ fontSize: 14, fontWeight: 800, color: "var(--navy-fg)", background: "var(--card)", border: "2px solid var(--navy-line)", padding: "4px 5px" }}
-                  >
-                    {MONTH_NAMES.map((mn, i) => (
-                      <option key={mn} value={i + 1}>
-                        {mn}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={draftYear}
-                    onChange={(e) => setDraftYear(Number(e.target.value))}
-                    className="rounded-xl"
-                    style={{ fontSize: 14, fontWeight: 800, color: "var(--navy-fg)", background: "var(--card)", border: "2px solid var(--navy-line)", padding: "4px 5px" }}
-                  >
-                    {YEARS.map((y) => (
-                      <option key={y} value={y}>
-                        {toBn(y)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex flex-col lg:flex-row">
-                  {/* --- খরচ ড্রাফট (৩০%, একাধিক সারি) --- */}
-                  <div className="px-3 w-full lg:max-w-[560px]">
-                    <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 16, color: "var(--navy-fg)", margin: "4px 0" }}>খরচ</p>
-                    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--line)" }}>
-                      <div className="grid" style={{ gridTemplateColumns: "1fr 70px 24px", background: "var(--navy-bg)" }}>
-                        <Th>বিবরণ</Th>
-                        <Th right>টাকা</Th>
-                        <Th />
-                      </div>
-                      {expenseDrafts.map((row, idx) => (
-                        <div
-                          key={idx}
-                          className="grid items-center"
-                          style={{ gridTemplateColumns: "1fr 70px 24px", background: "var(--card)", borderTop: idx > 0 ? "1px solid var(--line2)" : "none" }}
-                        >
-                          <NameInput
-                            value={row.name}
-                            onValue={(v) => updateExpenseDraft(idx, "name", v)}
-                            names={allExpenseNames}
-                            customNames={customExpenseNames}
-                            onAdd={async (nm) => {
-                              const n = await addPresetName("expense", nm);
-                              if (n) updateExpenseDraft(idx, "name", n);
-                            }}
-                            onRemove={(n) => removePresetName("expense", n)}
-                            placeholder="যেমন: নাস্তা"
-                            inputClass="px-2 py-2"
-                            inputStyle={{ fontSize: 15, color: "var(--ink)" }}
-                          />
-                          <input
-                            value={row.amount}
-                            onChange={(e) => updateExpenseDraft(idx, "amount", e.target.value)}
-                            inputMode="decimal"
-                            placeholder="0"
-                            className="min-w-0 w-full px-1 py-2 bg-transparent outline-none text-right"
-                            style={{ fontSize: 15, color: "var(--ink)" }}
-                          />
-                          <button onClick={() => removeExpenseDraftRow(idx)} className="flex items-center justify-center h-full" style={{ color: "var(--red)" }}>
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => setExpenseDrafts((rows) => [...rows, emptyExpenseDraft()])}
-                      className="w-full flex items-center justify-center gap-1 py-2 mt-1 rounded-xl active:opacity-70"
-                      style={{ background: "var(--bg)", color: "var(--navy-fg)", fontSize: 14, border: "1px dashed var(--line)" }}
-                    >
-                      <Plus size={15} /> খরচ যোগ করুন
-                    </button>
-                  </div>
-                </div>
-
-                <div className="px-3 py-3 flex gap-2">
-                  <button
-                    onClick={() => resetDraft(draftYear, draftMonth)}
-                    className="px-3 py-2 rounded-xl active:opacity-70"
-                    style={{ border: "1px solid var(--navy-line)", color: "var(--navy-fg)", fontSize: 12 }}
-                  >
-                    বাতিল
-                  </button>
-                  <button
-                    onClick={handleSaveDraft}
-                    disabled={saving}
-                    className="flex-1 py-2 rounded-xl active:opacity-80"
-                    style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 13, fontWeight: 600 }}
-                  >
-                    {saving ? "সেভ হচ্ছে…" : "সেভ করুন"}
-                  </button>
-                </div>
-              </div>
-              )}
-
               {/* ---- প্রতিদিনের বক্স ---- */}
               {monthLoading ? (
                 <div className="flex items-center justify-center py-10" style={{ color: "var(--navy-fg)" }}>
