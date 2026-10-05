@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu, LayoutGrid, TrendingUp, Wallet, Receipt, Clock, BarChart3, Users, Settings, Share2, MessageCircle, MessageSquare, Phone, RotateCcw, Moon, Sun, ShoppingBag } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu, LayoutGrid, TrendingUp, Wallet, Receipt, Clock, BarChart3, Users, Settings, Share2, MessageCircle, MessageSquare, Phone, RotateCcw, Moon, Sun, ShoppingBag, Shield } from "lucide-react";
 import { storage } from "./firebase";
 
 // ---------- constants ----------
@@ -128,9 +128,10 @@ function useLedgerFonts() {
   }, []);
 }
 
-// ---------- নিরাপদ স্টোরেজ: লোকাল মিরর + অফলাইন পেন্ডিং কিউ ----------
-// ১) সফল রিড/রাইট localStorage-এ মিরর হয়  ২) রিমোট সেভ ফেল হলে লেখা কিউতে জমা থাকে
-// ৩) নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হয় — লেখা কোনোদিন হারায় না
+// ---------- সুরক্ষিত স্টোরেজ ----------
+// ১) প্রতিটা রিড/রাইট ফোনে মিরর হয়  ২) সেভ ফেল হলে কিউতে জমা (ডুপ্লিকেট ছাড়া)
+// ৩) অন্য ডিভাইস মাঝখানে বদলে দিলে ওভাররাইট না করে মার্জ হয়, দুই কপিই রাখা থাকে
+// ৪) দৈনিক সার্ভার স্ন্যাপশট + ডিভাইসের কপি + ফাইল ব্যাকআপ — সবকিছু ফিরিয়ে আনা যায়
 function lsGet(key) {
   try {
     const v = localStorage.getItem("mirror:" + key);
@@ -146,75 +147,616 @@ function lsSet(key, value) {
     /* ignore */
   }
 }
-function queueWrite(key, value) {
+const hashStr = (s) => {
+  const t = String(s);
+  let h = 5381;
+  for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0;
+  return h + ":" + t.length;
+};
+const hashOrNone = (v) => (v === null || v === undefined || v === "" ? "none" : hashStr(v));
+function baseGet(key) {
   try {
-    const q = JSON.parse(localStorage.getItem("pendingWrites") || "[]");
-    q.push({ key, value });
-    localStorage.setItem("pendingWrites", JSON.stringify(q));
+    return localStorage.getItem("base:" + key);
+  } catch (e) {
+    return null;
+  }
+}
+function baseSet(key, v) {
+  try {
+    localStorage.setItem("base:" + key, hashOrNone(v));
   } catch (e) {
     /* ignore */
   }
 }
-function pendingCount() {
+function readQueue() {
   try {
-    return JSON.parse(localStorage.getItem("pendingWrites") || "[]").length;
+    return JSON.parse(localStorage.getItem("pendingWrites") || "[]");
   } catch (e) {
-    return 0;
+    return [];
   }
 }
-async function flushPendingWrites() {
-  let q = [];
+function writeQueue(q) {
   try {
-    q = JSON.parse(localStorage.getItem("pendingWrites") || "[]");
-  } catch (e) {
-    return 0;
-  }
-  let sent = 0;
-  for (let i = 0; i < q.length; i++) {
-    try {
-      await storage.set(q[i].key, q[i].value);
-      sent++;
-    } catch (e) {
-      // এখনো নেট নেই — বাকিটা পরে
-      try {
-        localStorage.setItem("pendingWrites", JSON.stringify(q.slice(i)));
-      } catch (e2) {}
-      return sent;
-    }
-  }
-  try {
-    localStorage.setItem("pendingWrites", "[]");
-  } catch (e) {}
-  return sent;
-}
-// রিড: রিমোট থেকে পেলে মিরর আপডেট; না পারলে লোকাল মিরর থেকে (স্টেইল ডেটা, কিন্তু হারায় না)
-async function kget(key) {
-  try {
-    const res = await storage.get(key);
-    if (res && res.value) {
-      lsSet(key, res.value);
-      return res.value;
-    }
-    return lsGet(key);
-  } catch (e) {
-    return lsGet(key);
-  }
-}
-// রাইট: আগে লোকাল মিরর, তারপর রিমোট; রিমোট ফেল হলে কিউতে (false রিটার্ন)
-async function kset(key, value) {
-  lsSet(key, value);
-  try {
-    await storage.set(key, value);
-    // একই key-এর পুরনো পেন্ডিং লেখা আর পাঠাবো না (ভুলক্রমে পুরনো ডেটা ওভাররাইট ঠেকাতে)
-    try {
-      const rest = JSON.parse(localStorage.getItem("pendingWrites") || "[]").filter((w) => w.key !== key);
-      localStorage.setItem("pendingWrites", JSON.stringify(rest));
-    } catch (e) {}
+    localStorage.setItem("pendingWrites", JSON.stringify(q));
     return true;
   } catch (e) {
-    queueWrite(key, value);
     return false;
   }
+}
+function queueWrite(key, value, baseHash, baseContent) {
+  const q = readQueue();
+  const i = q.findIndex((w) => w.key === key);
+  if (i >= 0) q[i] = { ...q[i], value }; // প্রথম 'বেস' ই থাকে, মান নতুনটা
+  else q.push({ key, value, base: baseHash === undefined ? null : baseHash, baseContent: baseContent || null });
+  if (!writeQueue(q)) {
+    try {
+      window.alert("⚠️ ফোনের স্টোরেজ ভরে গেছে — এই সেভ সার্ভারে না গেলে হারাতে পারে। নেট ঠিক আছে কিনা দেখুন, আর ডেটা সুরক্ষা পেজ থেকে ব্যাকআপ ফাইল নামিয়ে রাখুন।");
+    } catch (e) {
+      /* ignore */
+    }
+  }
+}
+function dropQueued(key) {
+  const q = readQueue();
+  if (q.some((w) => w.key === key)) writeQueue(q.filter((w) => w.key !== key));
+}
+function pendingCount() {
+  return readQueue().length;
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+async function readRemote(key, ms = 8000) {
+  try {
+    const res = await withTimeout(storage.get(key), ms);
+    return { ok: true, value: res && res.value ? res.value : null };
+  } catch (e) {
+    return { ok: false, value: null };
+  }
+}
+
+// ---- মার্জ (৩-ওয়ে): আমার বদল + অন্য ডিভাইসের বদল দুটোই থাকে ----
+const J = JSON.stringify;
+const pj = (s, fb) => {
+  try {
+    return s ? JSON.parse(s) : fb;
+  } catch (e) {
+    return fb;
+  }
+};
+const sameJ = (a, b) => J(a) === J(b);
+const idOfAny = (x) => (x && typeof x === "object" ? (x.id !== undefined ? String(x.id) : x.tid !== undefined ? String(x.tid) : J(x)) : String(x));
+function merge3List(b, m, r) {
+  const mk = (arr) => {
+    const mp = new Map();
+    (arr || []).forEach((x) => mp.set(idOfAny(x), x));
+    return mp;
+  };
+  const bm = mk(b);
+  const mm = mk(m);
+  const rm = mk(r);
+  const order = [];
+  const seen = new Set();
+  [...(r || []), ...(m || [])].forEach((x) => {
+    const id = idOfAny(x);
+    if (!seen.has(id)) {
+      seen.add(id);
+      order.push(id);
+    }
+  });
+  const out = [];
+  order.forEach((id) => {
+    const inB = bm.has(id);
+    const inM = mm.has(id);
+    const inR = rm.has(id);
+    const bv = bm.get(id);
+    const mv = mm.get(id);
+    const rv = rm.get(id);
+    if (inM && inR) {
+      if (!inB) out.push(rv);
+      else if (sameJ(mv, bv)) out.push(rv);
+      else if (sameJ(rv, bv)) out.push(mv);
+      else out.push(rv);
+    } else if (inM) {
+      if (!inB || !sameJ(mv, bv)) out.push(mv);
+    } else if (inR) {
+      if (!inB || !sameJ(rv, bv)) out.push(rv);
+    }
+  });
+  return out;
+}
+function merge3Map(b, m, r) {
+  const B = b || {};
+  const M = m || {};
+  const R = r || {};
+  const out = {};
+  new Set([...Object.keys(R), ...Object.keys(M)]).forEach((k) => {
+    const inB = k in B;
+    const inM = k in M;
+    const inR = k in R;
+    if (inM && inR) {
+      if (!inB || sameJ(M[k], B[k])) out[k] = R[k];
+      else if (sameJ(R[k], B[k])) out[k] = M[k];
+      else out[k] = R[k];
+    } else if (inM) {
+      if (!inB || !sameJ(M[k], B[k])) out[k] = M[k];
+    } else if (inR) {
+      if (!inB || !sameJ(R[k], B[k])) out[k] = R[k];
+    }
+  });
+  return out;
+}
+const scalar3 = (b, m, r) => (sameJ(m, b) ? r : sameJ(r, b) ? m : r);
+function mergeValues(key, baseStr, mineStr, remoteStr) {
+  const m = pj(mineStr, undefined);
+  const r = pj(remoteStr, undefined);
+  if (m === undefined || r === undefined) return null;
+  const b = baseStr ? pj(baseStr, null) : null;
+  try {
+    if (key.startsWith("day:")) {
+      const g = (o, f) => (o && Array.isArray(o[f]) ? o[f] : []);
+      return J({
+        ...r,
+        expenses: merge3List(b ? g(b, "expenses") : null, g(m, "expenses"), g(r, "expenses")),
+        items: merge3List(b ? g(b, "items") : null, g(m, "items"), g(r, "items")),
+        openingOverride: scalar3(b ? b.openingOverride ?? null : null, m.openingOverride ?? null, r.openingOverride ?? null),
+        totalOverride: scalar3(b ? b.totalOverride ?? null : null, m.totalOverride ?? null, r.totalOverride ?? null),
+      });
+    }
+    if (key.startsWith("dues:")) {
+      const out = {};
+      new Set([...Object.keys(r || {}), ...Object.keys(m || {})]).forEach((k) => {
+        const list = merge3List(b ? (b[k] || []) : null, (m || {})[k] || [], (r || {})[k] || []);
+        if (list.length) out[k] = list;
+      });
+      return J(out);
+    }
+    if (key.startsWith("yearstats:") || key === "shopinfo") return J(merge3Map(b, m, r));
+    if (key.startsWith("memos:") || key === "manualdues" || key === "trash" || key === "customers" || key.startsWith("presets:"))
+      return J(merge3List(Array.isArray(b) ? b : null, Array.isArray(m) ? m : [], Array.isArray(r) ? r : []));
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+function addRecalc(key) {
+  try {
+    const m = /^day:(\d+)-(\d+)-(\d+)$/.exec(key);
+    if (!m) return;
+    const list = JSON.parse(localStorage.getItem("recalc") || "[]");
+    const id = `${m[1]}-${m[2]}-${m[3]}`;
+    if (!list.includes(id)) list.push(id);
+    localStorage.setItem("recalc", JSON.stringify(list));
+  } catch (e) {
+    /* ignore */
+  }
+}
+// ---- IndexedDB (ডিভাইসের নিজস্ব কপি; বড় ডেটা রাখা যায়) ----
+function idbOpen() {
+  return new Promise((res, rej) => {
+    try {
+      const rq = indexedDB.open("rk-safe", 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore("kv");
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error);
+    } catch (e) {
+      rej(e);
+    }
+  });
+}
+async function idbPut(key, val) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res) => {
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(val, key);
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => res(false);
+      tx.onabort = () => res(false);
+    });
+  } catch (e) {
+    return false;
+  }
+}
+async function idbGet(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res) => {
+      const rq = db.transaction("kv").objectStore("kv").get(key);
+      rq.onsuccess = () => res(rq.result === undefined ? null : rq.result);
+      rq.onerror = () => res(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+async function idbDel(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res) => {
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").delete(key);
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => res(false);
+    });
+  } catch (e) {
+    return false;
+  }
+}
+async function idbKeys(prefix) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res) => {
+      const rq = db.transaction("kv").objectStore("kv").getAllKeys();
+      rq.onsuccess = () => res((rq.result || []).filter((k) => String(k).startsWith(prefix)));
+      rq.onerror = () => res([]);
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+async function resolveConflict(key, mineStr, remoteStr, baseContent) {
+  let merged = null;
+  try {
+    merged = mergeValues(key, baseContent, mineStr, remoteStr);
+  } catch (e) {
+    merged = null;
+  }
+  const value = merged !== null ? merged : mineStr;
+  const rec = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    at: Date.now(),
+    key,
+    base: baseContent || null,
+    mine: mineStr,
+    remote: remoteStr,
+    merged: value,
+    auto: merged !== null,
+  };
+  await idbPut("conflict:" + rec.id, J(rec));
+  try {
+    const s = J(rec);
+    if (s.length < 600000) await withTimeout(storage.set("conflict:" + rec.id, s), 6000);
+  } catch (e) {
+    /* ignore */
+  }
+  if (value !== remoteStr) {
+    addRecalc(key);
+    try {
+      window.dispatchEvent(new CustomEvent("rk-conflict", { detail: { key } }));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return value;
+}
+
+// রিড: রিমোট থেকে পেলে মিরর+বেস আপডেট; না পারলে লোকাল মিরর (পুরনো হতে পারে, কিন্তু হারায় না)
+async function kget(key) {
+  const r = await readRemote(key);
+  if (r.ok) {
+    if (r.value) {
+      lsSet(key, r.value);
+      baseSet(key, r.value);
+      return r.value;
+    }
+    baseSet(key, null);
+    return lsGet(key);
+  }
+  return lsGet(key);
+}
+// রাইট: ফোনে মিরর → (অন্য ডিভাইস বদলে দিলে মার্জ) → সার্ভার; ফেল হলে কিউতে (false)
+async function kset(key, value, opts = {}) {
+  const prev = lsGet(key);
+  lsSet(key, value);
+  const baseHash = baseGet(key);
+  const baseContent = prev !== null && baseHash !== null && hashOrNone(prev) === baseHash ? prev : null;
+  try {
+    let toWrite = value;
+    if (!opts.force && baseHash !== null) {
+      const r = await readRemote(key, 6000);
+      if (r.ok && r.value !== null) {
+        const rh = hashStr(r.value);
+        if (rh !== baseHash && rh !== hashStr(value)) toWrite = await resolveConflict(key, value, r.value, baseContent);
+      }
+    }
+    await storage.set(key, toWrite);
+    if (toWrite !== value) lsSet(key, toWrite);
+    baseSet(key, toWrite);
+    dropQueued(key);
+    return true;
+  } catch (e) {
+    queueWrite(key, value, baseHash, baseContent);
+    return false;
+  }
+}
+let flushing = false;
+async function flushPendingWrites() {
+  if (flushing) return 0;
+  flushing = true;
+  let sent = 0;
+  try {
+    const q = readQueue();
+    for (const w of q) {
+      try {
+        let toWrite = w.value;
+        const r = await readRemote(w.key, 8000);
+        if (r.ok && r.value !== null) {
+          const rh = hashStr(r.value);
+          if (rh === hashStr(w.value)) {
+            dropQueued(w.key);
+            baseSet(w.key, w.value);
+            sent++;
+            continue;
+          }
+          const hasBase = w.base !== null && w.base !== undefined;
+          if (!hasBase || rh !== w.base) toWrite = await resolveConflict(w.key, w.value, r.value, w.baseContent || null);
+        } else if (!r.ok && typeof navigator !== "undefined" && navigator.onLine === false) {
+          return sent;
+        }
+        await storage.set(w.key, toWrite);
+        lsSet(w.key, toWrite);
+        baseSet(w.key, toWrite);
+        dropQueued(w.key);
+        sent++;
+      } catch (e) {
+        return sent;
+      }
+    }
+    return sent;
+  } finally {
+    flushing = false;
+  }
+}
+
+// ---------- ব্যাকআপ / স্ন্যাপশট / রিস্টোর ----------
+const FIXED_DATA_KEYS = ["manualdues", "presets:sale", "presets:expense", "shopinfo", "trash", "customers"];
+const isDataKey = (k) => FIXED_DATA_KEYS.includes(k) || /^(day|dues|yearstats|memos):/.test(k);
+const SNAP_INDEX = "snap:index";
+const SNAP_CHUNK = 250000;
+const KEEP_DAILY = 14;
+const KEEP_MONTHLY = 6;
+const snapDateStr = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+async function listAllDataKeys() {
+  const keys = new Set(FIXED_DATA_KEYS);
+  for (const y of YEARS) {
+    keys.add(`dues:${y}`);
+    keys.add(`yearstats:${y}`);
+    keys.add(`memos:${y}`);
+  }
+  for (const y of YEARS) {
+    const r = await readRemote(`yearstats:${y}`, 8000);
+    const raw = r.ok && r.value ? r.value : lsGet(`yearstats:${y}`);
+    Object.keys(pj(raw, {})).forEach((k) => keys.add(`day:${y}-${k}`));
+  }
+  // সাম্প্রতিক দুই মাসের সব দিন (স্ট্যাটস না থাকলেও ধরা পড়ে)
+  const now = new Date();
+  for (let back = 0; back < 2; back++) {
+    const dt = new Date(now.getFullYear(), now.getMonth() - back, 1);
+    for (let d = 1; d <= daysInMonth(dt.getFullYear(), dt.getMonth() + 1); d++) keys.add(`day:${dt.getFullYear()}-${dt.getMonth() + 1}-${d}`);
+  }
+  if (typeof storage.list === "function") {
+    try {
+      const res = await withTimeout(storage.list("day:"), 10000);
+      const arr = Array.isArray(res) ? res : res && Array.isArray(res.keys) ? res.keys : [];
+      arr.forEach((k) => {
+        const name = typeof k === "string" ? k : k && (k.key || k.id);
+        if (name && isDataKey(name)) keys.add(name);
+      });
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return [...keys].filter(isDataKey);
+}
+async function collectAllData(onProgress) {
+  const keys = await listAllDataKeys();
+  const queued = new Set(readQueue().map((w) => w.key));
+  const data = {};
+  let failed = 0;
+  let stale = 0;
+  let done = 0;
+  const todo = [...keys];
+  const worker = async () => {
+    while (todo.length) {
+      const k = todo.shift();
+      if (queued.has(k) && lsGet(k)) {
+        data[k] = lsGet(k);
+      } else {
+        const r = await readRemote(k, 10000);
+        if (r.ok) {
+          if (r.value) data[k] = r.value;
+        } else {
+          const l = lsGet(k);
+          if (l) {
+            data[k] = l;
+            stale++;
+          } else failed++;
+        }
+      }
+      done++;
+      if (onProgress) onProgress(done, keys.length);
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker(), worker()]);
+  return { data, failed, stale, total: keys.length };
+}
+async function buildBackupObject(onProgress) {
+  const { data, failed, stale, total } = await collectAllData(onProgress);
+  return { obj: { app: "rk-ledger", version: 1, createdAt: Date.now(), date: snapDateStr(), keys: data }, failed, stale, total };
+}
+function selectKeep(list) {
+  const sorted = [...list].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const daily = sorted.slice(0, KEEP_DAILY);
+  const rest = sorted.slice(KEEP_DAILY);
+  const months = {};
+  rest.forEach((x) => {
+    const mo = x.date.slice(0, 7);
+    if (!months[mo] || x.date < months[mo].date) months[mo] = x;
+  });
+  const monthly = Object.values(months)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, KEEP_MONTHLY);
+  return { keep: [...daily, ...monthly], drop: rest.filter((x) => !monthly.includes(x)) };
+}
+async function saveLocalCopy(name, obj) {
+  const json = typeof obj === "string" ? obj : J(obj);
+  const meta = { at: Date.now(), date: snapDateStr(), keys: 0 };
+  try {
+    meta.keys = Object.keys((typeof obj === "string" ? JSON.parse(obj) : obj).keys || {}).length;
+  } catch (e) {
+    /* ignore */
+  }
+  if (name === "snap-latest") {
+    const prev = await idbGet("snap-latest");
+    const pm = await idbGet("snap-latest:meta");
+    if (prev) {
+      await idbPut("snap-prev", prev);
+      if (pm) await idbPut("snap-prev:meta", pm);
+    }
+  }
+  const ok = await idbPut(name, json);
+  if (ok) await idbPut(name + ":meta", meta);
+  return ok;
+}
+async function listLocalCopies() {
+  const out = [];
+  for (const [name, label] of [["snap-latest", "সর্বশেষ কপি"], ["snap-prev", "আগের কপি"], ["pre-restore", "রিস্টোরের ঠিক আগের অবস্থা"]]) {
+    const meta = await idbGet(name + ":meta");
+    if (meta) out.push({ name, label, ...meta });
+  }
+  return out;
+}
+async function readSnapIndex() {
+  const r = await readRemote(SNAP_INDEX, 8000);
+  if (!r.ok) return null;
+  const list = pj(r.value, []);
+  return Array.isArray(list) ? list : [];
+}
+async function loadServerSnapshot(entry) {
+  let json = "";
+  for (let i = 0; i < entry.chunks; i++) {
+    const r = await readRemote(`snap:${entry.date}:${i}`, 15000);
+    if (!r.ok || !r.value) throw new Error("chunk-missing");
+    json += r.value;
+  }
+  return JSON.parse(json);
+}
+async function createServerSnapshot(opts = {}, onProgress) {
+  const today = snapDateStr();
+  const idx = await readSnapIndex();
+  if (idx === null) return { status: "offline" };
+  if (!opts.force && idx.some((x) => x.date === today)) return { status: "exists", index: idx };
+  const { obj, failed, total } = await buildBackupObject(onProgress);
+  if (total > 0 && failed > total * 0.2) return { status: "partial", failed, total };
+  const json = J(obj);
+  const chunks = [];
+  for (let i = 0; i < json.length; i += SNAP_CHUNK) chunks.push(json.slice(i, i + SNAP_CHUNK));
+  if (!chunks.length) chunks.push("{}");
+  for (let i = 0; i < chunks.length; i++) await storage.set(`snap:${today}:${i}`, chunks[i]);
+  const check = await readRemote(`snap:${today}:${chunks.length - 1}`, 10000);
+  if (!check.ok || check.value !== chunks[chunks.length - 1]) return { status: "verify-failed" };
+  const entry = { date: today, chunks: chunks.length, keys: Object.keys(obj.keys).length, at: obj.createdAt, size: json.length };
+  const { keep, drop } = selectKeep([entry, ...idx.filter((x) => x.date !== today)]);
+  await storage.set(SNAP_INDEX, J(keep));
+  for (const d of drop) {
+    for (let i = 0; i < d.chunks; i++) {
+      try {
+        if (typeof storage.delete === "function") await storage.delete(`snap:${d.date}:${i}`);
+        else await storage.set(`snap:${d.date}:${i}`, "x");
+      } catch (e) {
+        /* ignore */
+      }
+    }
+  }
+  await saveLocalCopy("snap-latest", json);
+  return { status: "created", entry, failed };
+}
+// প্রতিদিন একবার: সার্ভার স্ন্যাপশট + এই ডিভাইসে কপি + ব্রাউজারকে ডেটা না মুছতে বলা
+async function runAutoProtection() {
+  try {
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  } catch (e) {
+    /* ignore */
+  }
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return { status: "offline" };
+  const res = await createServerSnapshot({});
+  if (res.status === "exists") {
+    const meta = await idbGet("snap-latest:meta");
+    if (!meta || meta.date !== snapDateStr()) {
+      const entry = (res.index || []).find((x) => x.date === snapDateStr());
+      if (entry) {
+        try {
+          await saveLocalCopy("snap-latest", await loadServerSnapshot(entry));
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    }
+  }
+  return res;
+}
+const markFileBackup = () => {
+  try {
+    localStorage.setItem("rk-last-file-backup", snapDateStr());
+  } catch (e) {
+    /* ignore */
+  }
+};
+const lastFileBackup = () => {
+  try {
+    return localStorage.getItem("rk-last-file-backup");
+  } catch (e) {
+    return null;
+  }
+};
+async function exportBackupFile(onProgress) {
+  const { obj, failed } = await buildBackupObject(onProgress);
+  const json = J(obj);
+  const name = `rk-hisab-backup-${obj.date}.json`;
+  const file = new File([json], name, { type: "application/json" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: name });
+      markFileBackup();
+      return { status: "shared", failed };
+    } catch (e) {
+      if (e && e.name === "AbortError") return { status: "cancelled" };
+    }
+  }
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  markFileBackup();
+  return { status: "downloaded", failed };
+}
+async function restoreFromBackupObject(obj, onProgress, opts = {}) {
+  if (!obj || obj.app !== "rk-ledger" || !obj.keys || typeof obj.keys !== "object") throw new Error("bad-format");
+  const entries = Object.entries(obj.keys).filter(([k, v]) => isDataKey(k) && typeof v === "string");
+  if (!opts.skipPre) {
+    let saved = false;
+    try {
+      const cur = await buildBackupObject();
+      saved = await saveLocalCopy("pre-restore", cur.obj);
+    } catch (e) {
+      saved = false;
+    }
+    if (!saved) return { status: "no-prerestore" };
+  }
+  let ok = 0;
+  let queued = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const done = await kset(entries[i][0], entries[i][1], { force: true });
+    if (done) ok++;
+    else queued++;
+    if (onProgress) onProgress(i + 1, entries.length);
+  }
+  return { status: "done", ok, queued, total: entries.length };
 }
 
 // ---------- storage helpers (Firestore-backed) ----------
@@ -403,6 +945,9 @@ async function buildAllTransactions() {
           amount: netTotal(it),
           due: dueRemaining(it),
           discount: num(it.discount) || 0,
+          customer: (it.customer || "").trim(),
+          billed: grossTotal(it) - (num(it.discount) || 0),
+          paid: Math.max(0, grossTotal(it) - (num(it.discount) || 0) - dueRemaining(it)),
         });
       });
     }
@@ -644,15 +1189,51 @@ function openCall(phone) {
 }
 
 // মেমো + বাকির তালিকা থেকে কাস্টমারভিত্তিক হিসাব
-function buildCustomers(memos, dues) {
+const CUSTOMERS_KEY = "customers";
+async function loadCustomerReg() {
+  const raw = await kget(CUSTOMERS_KEY);
+  const list = pj(raw, []);
+  return Array.isArray(list) ? list : [];
+}
+async function saveCustomerReg(list) {
+  return await kset(CUSTOMERS_KEY, JSON.stringify(list));
+}
+const lastUpdateText = (val) => {
+  if (!val) return "লেনদেন নেই";
+  const y = Math.floor(val / 10000);
+  const m = Math.floor(val / 100) % 100;
+  const d = val % 100;
+  const n = daysSince(y, m, d);
+  return `${toBn(d)} ${MONTH_NAMES[m - 1]} ${toBn(y)} · ${n <= 0 ? "আজ" : `${toBn(n)} দিন আগে`}`;
+};
+const lastUpdateColor = (val) => {
+  if (!val) return "var(--gray)";
+  const n = daysSince(Math.floor(val / 10000), Math.floor(val / 100) % 100, val % 100);
+  return n <= 1 ? "var(--green)" : n <= 3 ? "var(--amber-text)" : "var(--red)";
+};
+
+function buildCustomers(memos, dues, registry = [], sales = []) {
   const map = {};
   const touch = (name) => {
     const k = custKey(name);
     if (!k) return null;
-    if (!map[k]) map[k] = { key: k, name: String(name).trim(), phone: "", address: "", memos: [], dues: [], billed: 0, paid: 0, due: 0, lastVal: 0 };
+    if (!map[k]) map[k] = { key: k, name: String(name).trim(), phone: "", address: "", memos: [], dues: [], sales: [], reg: null, billed: 0, paid: 0, due: 0, lastVal: 0 };
     return map[k];
   };
   const val = (o) => o.y * 10000 + o.m * 100 + o.d;
+  registry.forEach((r) => {
+    const c = touch(r.name);
+    if (c) c.reg = r;
+  });
+  sales.forEach((sl) => {
+    if (!sl.customer) return;
+    const c = touch(sl.customer);
+    if (!c) return;
+    c.sales.push(sl);
+    c.billed += sl.billed || 0;
+    c.paid += sl.paid || 0;
+    c.lastVal = Math.max(c.lastVal, val(sl));
+  });
   [...memos]
     .sort((a, b) => val(a) - val(b) || (a.no || 0) - (b.no || 0))
     .forEach((mm) => {
@@ -684,6 +1265,11 @@ function buildCustomers(memos, dues) {
   });
   Object.values(map).forEach((c) => {
     c.due = c.dues.reduce((s, e) => s + (e.amount || 0), 0);
+    if (c.reg) {
+      c.name = String(c.reg.name).trim();
+      if (c.reg.phone) c.phone = c.reg.phone;
+      if (c.reg.address) c.address = c.reg.address;
+    }
   });
   return Object.values(map);
 }
@@ -695,8 +1281,19 @@ function customerRows(c) {
       const cc = memoCalc(mm);
       return { kind: "memo", mm, val: val(mm), y: mm.y, m: mm.m, d: mm.d, label: `মেমো নং ${toBn(mm.no)}`, total: cc.total, paid: cc.paid, due: cc.due };
     }),
+    ...c.sales.map((sl) => ({
+      kind: "sale",
+      val: val(sl),
+      y: sl.y,
+      m: sl.m,
+      d: sl.d,
+      label: `বিক্রি: ${sl.name}`,
+      total: sl.billed || 0,
+      paid: sl.paid || 0,
+      due: sl.due || 0,
+    })),
     ...c.dues
-      .filter((e) => !e.memoId)
+      .filter((e) => !e.memoId && !e.fromSale)
       .map((e) => ({
         kind: "due",
         val: val(e),
@@ -1303,7 +1900,7 @@ const ThemeButton = ({ variant = "header" }) => {
 };
 
 // নামের ঘর — ভিতরে ডাউন অ্যারো; চাপলে নামের তালিকা + "নতুন নাম যোগ করুন"
-const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeholder, inputClass = "px-2 py-2", inputStyle }) => {
+const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeholder, inputClass = "px-2 py-2", inputStyle, addLabel = "+ নতুন নাম যোগ করুন" }) => {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -1464,7 +2061,7 @@ const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeh
                 className="w-full text-left px-3 py-2.5 rk-active"
                 style={{ borderTop: "1px solid var(--navy-line)", color: "var(--navy-fg)", fontSize: 13.5, fontWeight: 700 }}
               >
-                + নতুন নাম যোগ করুন
+                {addLabel}
               </button>
             )}
           </div>,
@@ -1816,6 +2413,12 @@ export default function LedgerApp() {
   const [shop, setShop] = useState(DEFAULT_SHOP);
   const [shopDraft, setShopDraft] = useState(null);
   const [addingDue, setAddingDue] = useState(false);
+  const [customersReg, setCustomersReg] = useState([]);
+  const [custForm, setCustForm] = useState(null);
+  const [custSort, setCustSort] = useState("due"); // due | recent | name
+  const [lastEntry, setLastEntry] = useState(null);
+  const [safety, setSafety] = useState(null);
+  const [safetyBusy, setSafetyBusy] = useState("");
 
   const [yearStats, setYearStats] = useState({ income: 0, expense: 0 });
   const [yearStatsLoading, setYearStatsLoading] = useState(false);
@@ -1826,7 +2429,7 @@ export default function LedgerApp() {
   const [saving, setSaving] = useState(false);
 
   const emptyExpenseDraft = () => ({ id: null, name: "", amount: "" });
-  const emptySaleDraft = () => ({ id: null, name: "", height: "", weight: "", qty: "", price: "", due: "", discount: "" });
+  const emptySaleDraft = () => ({ id: null, name: "", customer: "", height: "", weight: "", qty: "", price: "", due: "", discount: "" });
 
   const getTodayDefaultDay = (y, m) => {
     const now = new Date();
@@ -1948,7 +2551,10 @@ export default function LedgerApp() {
     const remaining = totalMoney - expenseTotal;
     const dueRows = items
       .filter((it) => dueRemaining(it) > 0)
-      .map((it) => ({ id: it.id, name: it.name || "(নামহীন)", amount: dueRemaining(it) }));
+      .map((it) => {
+        const cn = (it.customer || "").trim();
+        return { id: it.id, name: cn || it.name || "(নামহীন)", amount: dueRemaining(it), ...(cn ? { item: it.name || "", fromSale: true } : {}) };
+      });
     await saveDuesForDate(y, m, d, dueRows);
     await saveYearStatsForDate(y, m, d, itemsTotal, expenseTotal, remaining);
   }
@@ -1985,8 +2591,191 @@ export default function LedgerApp() {
   const phoneOf = (name, entry) => {
     if (entry && entry.phone) return entry.phone;
     const k = custKey(name);
+    const rg = customersReg.find((c) => custKey(c.name) === k && c.phone);
+    if (rg) return rg.phone;
     const mm = memos.find((x) => custKey(x.customer) === k && x.phone);
     return mm ? mm.phone : "";
+  };
+
+  const allCustomerNames = [...new Map([...customersReg.map((c) => c.name), ...memos.map((x) => x.customer)].filter(Boolean).map((n) => [custKey(n), String(n).trim()])).values()];
+
+  const quickRegisterCustomer = async (rawName) => {
+    const name = (rawName || "").trim();
+    if (!name) return null;
+    if (customersReg.some((c) => custKey(c.name) === custKey(name))) return name;
+    const list = [...customersReg, { id: emptyRowId(), name, phone: "", address: "", at: Date.now() }];
+    setCustomersReg(list);
+    await saveCustomerReg(list);
+    return name;
+  };
+
+  const saveCustForm = async () => {
+    const f = custForm;
+    if (!f) return;
+    const name = (f.name || "").trim();
+    if (!name) {
+      window.alert("কাস্টমারের নাম লিখুন।");
+      return;
+    }
+    if (customersReg.some((c) => custKey(c.name) === custKey(name) && c.id !== f.id)) {
+      window.alert("এই নামে কাস্টমার আগেই রেজিস্টার করা আছে।");
+      return;
+    }
+    const phone = (f.phone || "").trim();
+    if (phone && digitsOnly(phone).length < 10 && !window.confirm("ফোন নম্বরটা ১০ ডিজিটের কম মনে হচ্ছে। তবুও সেভ করবেন?")) return;
+    const address = (f.address || "").trim();
+    const list = f.id
+      ? customersReg.map((c) => (c.id === f.id ? { ...c, name, phone, address } : c))
+      : [...customersReg, { id: emptyRowId(), name, phone, address, at: Date.now() }];
+    const ok = await saveCustomerReg(list);
+    setCustomersReg(list);
+    setCustForm(null);
+    setCustSel(custKey(name));
+    showToast(ok ? "✓ কাস্টমার সেভ হয়েছে" : "ফোনে সেভ হয়েছে — নেট এলে সার্ভারে যাবে");
+  };
+
+  const deleteCustReg = async (c) => {
+    if (!window.confirm(`${c.name} কে কাস্টমার তালিকা থেকে মুছবেন? (কোনো লেনদেন নেই বলেই মোছা যাচ্ছে)`)) return;
+    const list = customersReg.filter((x) => x.id !== c.reg.id);
+    await saveCustomerReg(list);
+    setCustomersReg(list);
+    setCustSel(null);
+    showToast("কাস্টমার মুছে ফেলা হয়েছে");
+  };
+
+  // ---- ডেটা সুরক্ষা পেজের কাজ ----
+  const refreshSafety = async () => {
+    const idx = await readSnapIndex();
+    const local = await listLocalCopies();
+    const ckeys = await idbKeys("conflict:");
+    const conflicts = [];
+    for (const k of ckeys.slice(-20)) {
+      const r = pj(await idbGet(k), null);
+      if (r) conflicts.push({ id: r.id, at: r.at, key: r.key, auto: r.auto });
+    }
+    conflicts.sort((a, b) => b.at - a.at);
+    setSafety({ idx, local, conflicts, fileDate: lastFileBackup(), pending: pendingCount() });
+  };
+  const needEdit = () => {
+    if (editMode) return false;
+    window.alert("রিস্টোরের মতো কাজের জন্য আগে এডিট মোড চালু করুন (পিন লাগবে)।");
+    return true;
+  };
+  const doExportFile = async () => {
+    if (safetyBusy) return;
+    setSafetyBusy("ফাইল তৈরি হচ্ছে…");
+    try {
+      const r = await exportBackupFile((d, t) => setSafetyBusy(`ডেটা পড়া হচ্ছে… ${toBn(d)}/${toBn(t)}`));
+      if (r.status === "shared") showToast("✓ ব্যাকআপ ফাইল পাঠানো হয়েছে");
+      else if (r.status === "downloaded") showToast("✓ ব্যাকআপ ফাইল নামানো হয়েছে — Drive/WhatsApp-এ নিজের কাছে রেখে দিন");
+      if (r.failed > 0) window.alert(`⚠️ ${toBn(r.failed)} টা ডেটা পড়া যায়নি (নেট সমস্যা)। নেট ঠিক হলে আবার ব্যাকআপ নিন।`);
+    } catch (e) {
+      window.alert("ব্যাকআপ ফাইল বানানো যায়নি — আবার চেষ্টা করুন।");
+    } finally {
+      setSafetyBusy("");
+      refreshSafety();
+    }
+  };
+  const doSnapshotNow = async () => {
+    if (safetyBusy) return;
+    setSafetyBusy("স্ন্যাপশট নেওয়া হচ্ছে…");
+    try {
+      const r = await createServerSnapshot({ force: true }, (d, t) => setSafetyBusy(`ডেটা পড়া হচ্ছে… ${toBn(d)}/${toBn(t)}`));
+      if (r.status === "created") showToast("✓ স্ন্যাপশট সার্ভারে ও এই ডিভাইসে রাখা হয়েছে");
+      else if (r.status === "offline") window.alert("ইন্টারনেট নেই — নেট এলে আবার চেষ্টা করুন।");
+      else window.alert("স্ন্যাপশট পুরোপুরি হয়নি (" + r.status + ") — আবার চেষ্টা করুন।");
+    } catch (e) {
+      window.alert("স্ন্যাপশট নেওয়া যায়নি — আবার চেষ্টা করুন।");
+    } finally {
+      setSafetyBusy("");
+      refreshSafety();
+    }
+  };
+  const runRestore = async (obj, label) => {
+    if (needEdit()) return;
+    const n = Object.keys((obj && obj.keys) || {}).length;
+    if (!window.confirm(`"${label}" থেকে ${toBn(n)} টা ডেটা ফিরিয়ে আনবেন?\n\nবর্তমান ডেটার ওই অংশ এই কপির ডেটা দিয়ে বদলে যাবে। রিস্টোরের ঠিক আগের অবস্থা এই ডিভাইসে আলাদা করে রাখা হবে।`)) return;
+    setSafetyBusy("রিস্টোর হচ্ছে…");
+    try {
+      let r = await restoreFromBackupObject(obj, (d, t) => setSafetyBusy(`রিস্টোর হচ্ছে… ${toBn(d)}/${toBn(t)}`));
+      if (r.status === "no-prerestore") {
+        if (!window.confirm("রিস্টোরের আগের অবস্থার কপি রাখা যায়নি (নেট/স্টোরেজ সমস্যা)। তবুও রিস্টোর করবেন?")) return;
+        r = await restoreFromBackupObject(obj, null, { skipPre: true });
+      }
+      window.alert(`✓ ${toBn(r.ok)} টা ফিরেছে${r.queued ? `, ${toBn(r.queued)} টা নেট এলে যাবে` : ""}। অ্যাপ নতুন করে লোড হবে।`);
+      window.location.reload();
+    } catch (e) {
+      window.alert(e && e.message === "bad-format" ? "এটা এই অ্যাপের ব্যাকআপ ফাইল নয়।" : "রিস্টোর হয়নি — আবার চেষ্টা করুন।");
+    } finally {
+      setSafetyBusy("");
+    }
+  };
+  const restoreFromFile = async (file) => {
+    if (!file) return;
+    try {
+      const obj = JSON.parse(await file.text());
+      await runRestore(obj, file.name);
+    } catch (e) {
+      window.alert("ফাইলটা পড়া যায়নি — সঠিক ব্যাকআপ ফাইল দিন।");
+    }
+  };
+  const restoreFromServer = async (entry) => {
+    try {
+      setSafetyBusy("স্ন্যাপশট নামানো হচ্ছে…");
+      const obj = await loadServerSnapshot(entry);
+      setSafetyBusy("");
+      await runRestore(obj, `${entry.date} এর সার্ভার স্ন্যাপশট`);
+    } catch (e) {
+      setSafetyBusy("");
+      window.alert("স্ন্যাপশটটা নামানো যায়নি — নেট দেখে আবার চেষ্টা করুন।");
+    }
+  };
+  const restoreFromLocal = async (c) => {
+    const raw = await idbGet(c.name);
+    const obj = pj(raw, null);
+    if (!obj) {
+      window.alert("এই কপিটা পড়া যায়নি।");
+      return;
+    }
+    await runRestore(obj, `${c.label} (${c.date})`);
+  };
+  const conflictUseMine = async (c) => {
+    if (needEdit()) return;
+    const rec = pj(await idbGet("conflict:" + c.id), null);
+    if (!rec) return;
+    if (!window.confirm("এই ডিভাইসের কপিটা (বিবাদের সময়ের) সার্ভারে বসাবেন? অন্য ডিভাইসের ওই অংশের পরিবর্তন বাদ পড়বে।")) return;
+    await kset(rec.key, rec.mine, { force: true });
+    addRecalc(rec.key);
+    await idbDel("conflict:" + c.id);
+    showToast("✓ বসানো হয়েছে");
+    refreshSafety();
+  };
+  const conflictDismiss = async (c) => {
+    await idbDel("conflict:" + c.id);
+    refreshSafety();
+  };
+  const processRecalc = async () => {
+    let list = [];
+    try {
+      list = JSON.parse(localStorage.getItem("recalc") || "[]");
+    } catch (e) {
+      list = [];
+    }
+    if (!list.length) return;
+    try {
+      localStorage.setItem("recalc", "[]");
+    } catch (e) {
+      /* ignore */
+    }
+    for (const id of list) {
+      const [yy, mm, dd] = id.split("-").map(Number);
+      try {
+        const raw = await loadDay(yy, mm, dd);
+        await recomputeAndSaveDay(yy, mm, dd, raw);
+      } catch (e) {
+        addRecalc(dayKey(yy, mm, dd));
+      }
+    }
   };
 
   const handleSharePdf = async (doc, filename, text) => {
@@ -2142,7 +2931,7 @@ export default function LedgerApp() {
     setMemoDraft((dr) => {
       const next = { ...dr, customer: val };
       if (!dr.phone && !dr.address) {
-        const prev = memos.find((x) => x.customer === val);
+        const prev = customersReg.find((c) => custKey(c.name) === custKey(val)) || memos.find((x) => custKey(x.customer) === custKey(val));
         if (prev) {
           next.phone = prev.phone || "";
           next.address = prev.address || "";
@@ -2318,6 +3107,7 @@ export default function LedgerApp() {
       {
         id: row.id,
         name: row.name,
+        customer: row.customer ?? "",
         height: row.height,
         weight: row.weight,
         qty: row.qty,
@@ -2340,6 +3130,14 @@ export default function LedgerApp() {
 
       const meaningfulExpenseDrafts = expenseDrafts.filter(isMeaningfulExpense);
       const meaningfulSaleDrafts = saleDrafts.filter(isMeaningfulItem);
+      const noCust = meaningfulSaleDrafts.filter((r) => num(r.due) > 0 && !(r.customer || "").trim());
+      if (
+        noCust.length &&
+        !window.confirm(
+          `${toBn(noCust.length)} টা বিক্রিতে বাকি আছে কিন্তু ক্রেতার নাম দেওয়া হয়নি।\nবাকির লিস্টে বিক্রির নামে (${noCust[0].name || "নামহীন"}) উঠবে।\n\nতবুও সেভ করবেন?`
+        )
+      )
+        return;
 
       // --- খরচ ড্রাফট(গুলো) সেভ ---
       if (meaningfulExpenseDrafts.length > 0) {
@@ -2555,7 +3353,7 @@ export default function LedgerApp() {
 
   // গ্রাহক লেজার / এন্ট্রি খোঁজার ডেটা লোড
   useEffect(() => {
-    if (view !== "ledger") return;
+    if (view !== "ledger" && view !== "customers") return;
     let cancelled = false;
     setLedgerLoading(true);
     (async () => {
@@ -2568,6 +3366,89 @@ export default function LedgerApp() {
     return () => {
       cancelled = true;
     };
+  }, [view]);
+
+  // কাস্টমার রেজিস্ট্রি + মেমো (নামের তালিকা) লোড
+  useEffect(() => {
+    if (!unlocked) return;
+    (async () => {
+      setCustomersReg(await loadCustomerReg());
+      refreshMemos();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlocked]);
+
+  // হোমে: শেষ হিসাব কবে ওঠানো হয়েছে
+  useEffect(() => {
+    if (view !== "years") return;
+    let cancelled = false;
+    (async () => {
+      let found = null;
+      for (const yy of [_NOW_YEAR, _NOW_YEAR - 1]) {
+        const st = await loadYearStats(yy);
+        const keys = Object.keys(st)
+          .filter((k) => (st[k].income || 0) > 0 || (st[k].expense || 0) > 0)
+          .map((k) => {
+            const [mm, dd] = k.split("-").map(Number);
+            return { y: yy, m: mm, d: dd };
+          })
+          .sort((a, b) => b.m - a.m || b.d - a.d);
+        if (keys.length) {
+          found = keys[0];
+          break;
+        }
+      }
+      if (!cancelled) setLastEntry(found);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
+
+  // ডেটা সুরক্ষা: দৈনিক স্ন্যাপশট, কনফ্লিক্ট বার্তা, পেন্ডিং ফ্লাশ, বন্ধ করার আগে সতর্কতা
+  useEffect(() => {
+    if (!unlocked) return;
+    const t = setTimeout(async () => {
+      const r = await runAutoProtection();
+      if (r && r.status === "created") showToast("🛡 আজকের নিরাপত্তা-কপি নেওয়া হয়েছে");
+    }, 7000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlocked]);
+  useEffect(() => {
+    if (!unlocked) return;
+    processRecalc();
+    const onConflict = () => {
+      showToast("⚠ অন্য ডিভাইসের পরিবর্তনের সাথে মিলিয়ে নেওয়া হয়েছে — কিছু হারায়নি (ডেটা সুরক্ষা পেজে দেখুন)");
+      setTimeout(processRecalc, 800);
+    };
+    window.addEventListener("rk-conflict", onConflict);
+    return () => window.removeEventListener("rk-conflict", onConflict);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlocked]);
+  useEffect(() => {
+    const warn = (e) => {
+      if (pendingCount() > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    const t = setInterval(async () => {
+      if (pendingCount() > 0 && navigator.onLine !== false) {
+        const n = await flushPendingWrites();
+        if (n > 0) showToast(`✅ ${toBn(n)} টা পেন্ডিং সেভ সার্ভারে পাঠানো হয়েছে।`);
+      }
+    }, 25000);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (view === "safety") refreshSafety();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   // দোকানের তথ্য (লোগো/ঠিকানা/ফোন) লোড
@@ -2874,6 +3755,31 @@ export default function LedgerApp() {
                           <button onClick={() => removeSaleDraftRow(idx)} className="flex items-center justify-center h-full" style={{ color: "var(--red)" }}>
                             <Trash2 size={15} />
                           </button>
+                          <div className="px-2 pb-2 pt-0.5 flex items-center gap-2" style={{ gridColumn: "1 / -1" }}>
+                            <span style={{ fontSize: 12, color: "var(--gray)", whiteSpace: "nowrap" }}>👤 ক্রেতা:</span>
+                            <div className="flex-1 min-w-0 rounded-xl" style={{ border: "1px solid var(--line)", background: "var(--bg)" }}>
+                              <NameInput
+                                value={row.customer || ""}
+                                onValue={(v) => updateSaleDraft(idx, "customer", v)}
+                                names={allCustomerNames}
+                                customNames={[]}
+                                onAdd={async (nm) => {
+                                  const n = await quickRegisterCustomer(nm);
+                                  if (n) updateSaleDraft(idx, "customer", n);
+                                }}
+                                onRemove={() => {}}
+                                addLabel="+ নতুন কাস্টমার যোগ করুন"
+                                placeholder="ক্রেতার নাম (বাকি থাকলে এই নামে বাকির লিস্টে যাবে)"
+                                inputClass="px-2 py-1.5"
+                                inputStyle={{ fontSize: 13.5, color: "var(--ink)" }}
+                              />
+                            </div>
+                          </div>
+                          {num(row.due) > 0 && !(row.customer || "").trim() && (
+                            <div className="px-3 pb-2" style={{ gridColumn: "1 / -1", fontSize: 11.5, color: "var(--red)" }}>
+                              ⚠ বাকি আছে — ক্রেতার নাম দিন, না হলে বাকি "{row.name || "নামহীন"}" নামে যাবে
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2980,12 +3886,12 @@ export default function LedgerApp() {
         ))}
       </datalist>
       <datalist id="memo-customer-options">
-        {[...new Set(memos.map((x) => x.customer))].map((n) => (
+        {[...new Set([...customersReg.map((c) => c.name), ...memos.map((x) => x.customer)])].map((n) => (
           <option key={n} value={n} />
         ))}
       </datalist>
       <datalist id="due-name-options">
-        {[...new Set(allDues.map((x) => x.name))].map((n) => (
+        {[...new Set([...customersReg.map((c) => c.name), ...allDues.map((x) => x.name)])].map((n) => (
           <option key={n} value={n} />
         ))}
       </datalist>
@@ -3069,6 +3975,7 @@ export default function LedgerApp() {
                         { label: "কাস্টমারের পুরো হিসাব", icon: <Users size={17} />, onClick: () => { setCustSel(null); setView("customers"); } },
                         { label: "গ্রাহক লেজার / এন্ট্রি খুঁজুন", icon: <Search size={17} />, onClick: () => setView("ledger") },
                         { label: "রিসাইকেল বিন (মোছা ফেরত)", icon: <RotateCcw size={17} />, onClick: () => setView("trash") },
+                        { label: "ডেটা সুরক্ষা ও ব্যাকআপ", icon: <Shield size={17} />, onClick: () => setView("safety") },
                         { label: "দোকানের তথ্য ও লোগো", icon: <Settings size={17} />, onClick: () => setView("settings") },
                         { label: "ডার্ক / লাইট মোড বদলান", icon: <Moon size={17} />, onClick: toggleTheme },
                         {
@@ -3104,6 +4011,39 @@ export default function LedgerApp() {
                     </div>
                   ))}
                 </div>
+
+                {/* শেষ হিসাব ওঠানো */}
+                <div className="px-5 py-3 mb-3 flex items-center justify-between" style={card}>
+                  <div style={{ color: GRAY, fontSize: 14 }}>🗓 শেষ হিসাব ওঠানো</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: lastEntry ? lastUpdateColor(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : GRAY }}>
+                    {lastEntry ? lastUpdateText(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : "—"}
+                  </div>
+                </div>
+
+                {/* ডেটা সুরক্ষা অবস্থা */}
+                {(() => {
+                  const fb = lastFileBackup();
+                  const fbDays = fb ? Math.floor((Date.now() - new Date(fb + "T00:00:00").getTime()) / 86400000) : null;
+                  const bad = pending > 0;
+                  const warn = !bad && (fbDays === null || fbDays >= 7);
+                  return (
+                    <button onClick={() => setView("safety")} className="w-full flex items-center justify-between px-5 py-3 mb-3 active:opacity-90" style={card}>
+                      <div className="text-left">
+                        <div style={{ color: NAVY, fontSize: 15, fontWeight: 700 }}>🛡 ডেটা সুরক্ষা</div>
+                        <div style={{ color: bad ? "var(--red)" : warn ? "var(--amber-text)" : "var(--green)", fontSize: 12.5, marginTop: 2, fontWeight: 600 }}>
+                          {bad
+                            ? `⏳ ${toBn(pending)} টা সেভ সার্ভারে যাওয়া বাকি`
+                            : fbDays === null
+                            ? "⚠ ব্যাকআপ ফাইল এখনও নামানো হয়নি"
+                            : fbDays >= 7
+                            ? `⚠ ব্যাকআপ ফাইল ${toBn(fbDays)} দিন আগের — নতুন নামান`
+                            : "✓ সুরক্ষিত — দৈনিক কপি চলছে"}
+                        </div>
+                      </div>
+                      <div style={{ color: GRAY, fontSize: 20 }}>›</div>
+                    </button>
+                  );
+                })()}
 
                 {/* বাকির লিস্ট */}
                 <button onClick={() => setView("dues")} className="w-full flex items-center justify-between px-5 py-4 mb-3 active:opacity-90" style={card}>
@@ -3177,7 +4117,7 @@ export default function LedgerApp() {
                   <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 92px" }}>
                     <input
                       value={newDue.name}
-                      onChange={(ev) => setNewDue((p) => ({ ...p, name: ev.target.value }))}
+                      onChange={(ev) => setNewDue((p) => ({ ...p, name: ev.target.value, phone: p.phone || phoneOf(ev.target.value) }))}
                       list="due-name-options"
                       placeholder="কার বাকি (নাম)"
                       className="min-w-0 px-2 py-2 rounded-xl outline-none"
@@ -3295,7 +4235,7 @@ export default function LedgerApp() {
                                     {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
                                   </div>
                                   <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "var(--ink)" }}>
-                                    {e.name}
+                                    {e.name}{e.item ? <span style={{ fontSize: 10.5, color: "var(--gray)" }}> · {e.item}</span> : null}
                                     {stage >= 1 && (
                                       <span style={{ fontSize: 9.5, color: stColor, marginLeft: 5, fontWeight: 700 }}>
                                         {stage === 1 ? "⏰" : stage === 2 ? "⚠" : "⚠⚠"} {toBn(days)} দিন
@@ -3978,12 +4918,172 @@ export default function LedgerApp() {
           </>
         )}
 
+        {/* ---------- SAFETY (ডেটা সুরক্ষা ও ব্যাকআপ) ---------- */}
+        {view === "safety" &&
+          (() => {
+            const NAVY = "var(--navy-fg)";
+            const GRAY = "var(--gray)";
+            const box = { background: "var(--card)", border: "1px solid var(--line)" };
+            const fmtDate = (ds) => {
+              if (!ds) return null;
+              const [yy, mm, dd] = ds.split("-").map(Number);
+              return `${toBn(dd)} ${MONTH_NAMES[mm - 1]} ${toBn(yy)}`;
+            };
+            const fb = safety ? safety.fileDate : null;
+            const fbDays = fb ? Math.floor((Date.now() - new Date(fb + "T00:00:00").getTime()) / 86400000) : null;
+            const latest = safety && safety.idx && safety.idx[0];
+            const localLatest = safety && safety.local.find((c) => c.name === "snap-latest");
+            const row = (ok, label, value) => (
+              <div className="flex items-start justify-between gap-3 py-1.5" style={{ borderTop: "1px solid var(--line2)" }}>
+                <div style={{ fontSize: 13, color: GRAY }}>{label}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, textAlign: "right", color: ok === true ? "var(--green)" : ok === false ? "var(--red)" : "var(--amber-text)" }}>{value}</div>
+              </div>
+            );
+            const btn = (label, onClick, primary, disabled) => (
+              <button
+                onClick={onClick}
+                disabled={disabled || !!safetyBusy}
+                className="w-full py-3 rounded-xl active:opacity-80 mb-2"
+                style={{
+                  background: primary ? "var(--navy-bg)" : "var(--card)",
+                  color: primary ? "var(--on-navy)" : NAVY,
+                  border: "1px solid var(--navy-line)",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  opacity: disabled || safetyBusy ? 0.6 : 1,
+                }}
+              >
+                {label}
+              </button>
+            );
+            return (
+              <>
+                <HeaderBar title="ডেটা সুরক্ষা ও ব্যাকআপ" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
+                <div className="px-3 pt-4 pb-10">
+                  {safetyBusy && (
+                    <div className="rounded-xl px-3 py-2 mb-3" style={{ background: "var(--tint)", color: NAVY, fontSize: 13, fontWeight: 600 }}>
+                      ⏳ {safetyBusy}
+                    </div>
+                  )}
+                  <div className="rounded-xl px-4 py-3 mb-3" style={box}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 4 }}>বর্তমান অবস্থা</div>
+                    {!safety ? (
+                      <p style={{ fontSize: 12, color: GRAY }}>লোড হচ্ছে…</p>
+                    ) : (
+                      <>
+                        {row(safety.pending === 0, "সার্ভারে যেতে বাকি সেভ", safety.pending === 0 ? "কিছুই নেই ✓" : `${toBn(safety.pending)} টা (নেট এলে যাবে)`)}
+                        {row(
+                          safety.idx === null ? null : !!latest,
+                          "সার্ভারের সর্বশেষ নিরাপত্তা-কপি",
+                          safety.idx === null ? "নেট নেই — দেখা যাচ্ছে না" : latest ? `${fmtDate(latest.date)} (${toBn(latest.keys)} টা ডেটা)` : "এখনো নেই"
+                        )}
+                        {row(!!localLatest, "এই ডিভাইসের নিজস্ব কপি", localLatest ? fmtDate(localLatest.date) : "এখনো নেই")}
+                        {row(
+                          fbDays !== null && fbDays < 7,
+                          "ব্যাকআপ ফাইল (আপনার হাতে)",
+                          fbDays === null ? "কখনো নামানো হয়নি" : fbDays === 0 ? "আজ ✓" : `${toBn(fbDays)} দিন আগে${fbDays >= 7 ? " — নতুন নামান" : ""}`
+                        )}
+                        {row(safety.conflicts.length === 0 ? true : null, "মিলিয়ে নেওয়া সংঘর্ষ", safety.conflicts.length === 0 ? "নেই ✓" : `${toBn(safety.conflicts.length)} টা (নিচে)`)}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl px-4 py-3 mb-3" style={box}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 6 }}>ব্যাকআপ নিন</div>
+                    {btn("📤 ব্যাকআপ ফাইল নামান / পাঠান (Drive, WhatsApp)", doExportFile, true)}
+                    {btn("🛡 এখনই নিরাপত্তা-কপি নিন (সার্ভার + এই ডিভাইস)", doSnapshotNow)}
+                    <p style={{ fontSize: 11.5, color: GRAY, lineHeight: 1.6 }}>
+                      প্রতিদিন অ্যাপ খুললে নিজে থেকে সার্ভারে নিরাপত্তা-কপি নেওয়া হয় (শেষ ১৪ দিন + প্রতি মাসের একটা রাখা হয়) আর এই ডিভাইসেও একটা কপি থাকে। ব্যাকআপ ফাইলটা নিজের Google Drive বা WhatsApp-এ রেখে দিন, সপ্তাহে অন্তত একবার — তাহলে সার্ভারে কিছু হলেও আপনার কাছে সব থাকবে। ফাইলে পাসওয়ার্ড/পিন থাকে না।
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl px-4 py-3 mb-3" style={box}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 6 }}>ফিরিয়ে আনুন (রিস্টোর)</div>
+                    {!editMode && <p style={{ fontSize: 11.5, color: "var(--amber-text)", marginBottom: 8 }}>রিস্টোরের জন্য আগে এডিট মোড চালু করুন।</p>}
+                    <label
+                      className="block w-full py-3 rounded-xl text-center mb-2"
+                      style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: safetyBusy ? 0.6 : 1 }}
+                    >
+                      📥 ব্যাকআপ ফাইল থেকে রিস্টোর
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        style={{ display: "none" }}
+                        disabled={!!safetyBusy}
+                        onChange={(ev) => {
+                          const f = ev.target.files && ev.target.files[0];
+                          ev.target.value = "";
+                          restoreFromFile(f);
+                        }}
+                      />
+                    </label>
+                    {safety && safety.idx && safety.idx.length > 0 && (
+                      <>
+                        <div style={{ fontSize: 12.5, color: GRAY, margin: "10px 0 4px" }}>সার্ভারের নিরাপত্তা-কপি</div>
+                        {safety.idx.map((en) => (
+                          <div key={en.date} className="flex items-center justify-between py-1.5" style={{ borderTop: "1px solid var(--line2)" }}>
+                            <span style={{ fontSize: 13, color: "var(--ink)" }}>
+                              {fmtDate(en.date)} <span style={{ color: GRAY, fontSize: 11.5 }}>· {toBn(en.keys)} টা ডেটা</span>
+                            </span>
+                            <button onClick={() => restoreFromServer(en)} disabled={!!safetyBusy} className="px-3 py-1 rounded-full active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12, fontWeight: 700 }}>
+                              ফিরিয়ে আনুন
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {safety && safety.local.length > 0 && (
+                      <>
+                        <div style={{ fontSize: 12.5, color: GRAY, margin: "10px 0 4px" }}>এই ডিভাইসের কপি</div>
+                        {safety.local.map((c) => (
+                          <div key={c.name} className="flex items-center justify-between py-1.5" style={{ borderTop: "1px solid var(--line2)" }}>
+                            <span style={{ fontSize: 13, color: "var(--ink)" }}>
+                              {c.label} <span style={{ color: GRAY, fontSize: 11.5 }}>· {fmtDate(c.date)} · {toBn(c.keys)} টা</span>
+                            </span>
+                            <button onClick={() => restoreFromLocal(c)} disabled={!!safetyBusy} className="px-3 py-1 rounded-full active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12, fontWeight: 700 }}>
+                              ফিরিয়ে আনুন
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+
+                  {safety && safety.conflicts.length > 0 && (
+                    <div className="rounded-xl px-4 py-3 mb-3" style={{ ...box, border: "1px solid var(--orange)" }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--amber-text)", marginBottom: 4 }}>মিলিয়ে নেওয়া সংঘর্ষ</div>
+                      <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 6, lineHeight: 1.6 }}>
+                        দুই ডিভাইসে একই জিনিস একসাথে বদলালে অ্যাপ দুটোই মিলিয়ে রেখেছে, কিছু হারায়নি। এই ডিভাইসের কপি আলাদা করে রাখা আছে — সব ঠিক থাকলে "ঠিক আছে" চাপুন।
+                      </p>
+                      {safety.conflicts.map((c) => (
+                        <div key={c.id} className="py-2" style={{ borderTop: "1px solid var(--line2)" }}>
+                          <div style={{ fontSize: 12.5, color: "var(--ink)" }}>
+                            {c.key.replace(/^day:/, "দিন ").replace(/^dues:/, "বাকি ").replace(/^yearstats:/, "সারাংশ ").replace(/^memos:/, "মেমো ")}
+                            <span style={{ color: GRAY, fontSize: 11 }}> · {new Date(c.at).toLocaleString("bn-BD")} · {c.auto ? "নিজে মিলেছে" : "আমার কপি বসেছে"}</span>
+                          </div>
+                          <div className="flex gap-2 mt-1.5">
+                            <button onClick={() => conflictDismiss(c)} className="px-3 py-1 rounded-full active:opacity-70" style={{ background: "var(--navy-bg)", color: "#FFFFFF", fontSize: 12, fontWeight: 700 }}>
+                              ঠিক আছে
+                            </button>
+                            <button onClick={() => conflictUseMine(c)} className="px-3 py-1 rounded-full active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12 }}>
+                              এই ডিভাইসের কপি বসান
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+
         {/* ---------- CUSTOMERS (কাস্টমারভিত্তিক পুরো হিসাব) ---------- */}
         {view === "customers" &&
           (() => {
             const NAVY = "var(--navy-fg)";
             const GRAY = "var(--gray)";
-            const custs = buildCustomers(memos, allDues);
+            const custs = buildCustomers(memos, allDues, customersReg, ledgerData.filter((r) => r.type === "বিক্রি" && r.customer));
             const sel = custSel ? custs.find((c) => c.key === custSel) : null;
             const tile = (label, value, color) => (
               <div className="rounded-xl px-2 py-2.5 text-center" style={{ background: "var(--card)", border: "1px solid var(--line)" }}>
@@ -4010,7 +5110,50 @@ export default function LedgerApp() {
                   onToggleMode={toggleEditMode}
                 />
                 <div className="px-3 pt-4 pb-10">
-                  {allDuesLoading ? (
+                  {custForm && (
+                    <div className="rounded-xl mb-4 px-3 py-3" style={{ border: "2px solid var(--navy-line)", background: "var(--card)" }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 8 }}>
+                        {custForm.id ? "কাস্টমারের তথ্য বদলান" : "নতুন কাস্টমার রেজিস্টার"}
+                      </div>
+                      {[
+                        ["name", "কাস্টমারের নাম *", "text", custForm.locked],
+                        ["phone", "ফোন নম্বর", "tel", false],
+                        ["address", "ঠিকানা", "text", false],
+                      ].map(([f, label, type, locked]) => (
+                        <div key={f} className="mb-2">
+                          <div style={{ fontSize: 11.5, color: GRAY, marginBottom: 3 }}>
+                            {label}
+                            {locked ? " (লেনদেন থাকায় নাম বদলানো যাবে না)" : ""}
+                          </div>
+                          <input
+                            value={custForm[f] || ""}
+                            onChange={(ev) => setCustForm((p) => ({ ...p, [f]: ev.target.value }))}
+                            inputMode={type === "tel" ? "tel" : undefined}
+                            disabled={locked}
+                            className="w-full px-3 py-2 rounded-xl outline-none"
+                            style={{ fontSize: 14, border: "1px solid var(--line)", background: locked ? "var(--bg)" : "var(--card)", color: "var(--ink)" }}
+                          />
+                        </div>
+                      ))}
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => setCustForm(null)}
+                          className="px-4 py-2.5 rounded-xl active:opacity-70"
+                          style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 13.5, fontWeight: 600 }}
+                        >
+                          বাতিল
+                        </button>
+                        <button
+                          onClick={saveCustForm}
+                          className="flex-1 py-2.5 rounded-xl active:opacity-80"
+                          style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}
+                        >
+                          সেভ করুন
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {allDuesLoading || ledgerLoading ? (
                     <p style={{ fontSize: 12, color: GRAY }}>লোড হচ্ছে…</p>
                   ) : sel ? (
                     (() => {
@@ -4019,11 +5162,37 @@ export default function LedgerApp() {
                       return (
                         <>
                           <div className="rounded-xl px-4 py-3 mb-3" style={{ background: "var(--card)", border: "1px solid var(--line)" }}>
-                            <div style={{ fontSize: 17, fontWeight: 700, color: NAVY }}>{sel.name}</div>
-                            <div style={{ fontSize: 13, color: GRAY, marginTop: 2 }}>
-                              {sel.phone ? `📞 ${sel.phone}` : "ফোন নম্বর নেই — মেমোতে ফোন দিলে এখানে আসবে"}
+                            <div className="flex items-start justify-between gap-2">
+                              <div style={{ fontSize: 17, fontWeight: 700, color: NAVY }}>{sel.name}</div>
+                              {editMode && (
+                                <button
+                                  onClick={() =>
+                                    setCustForm({
+                                      id: sel.reg ? sel.reg.id : null,
+                                      name: sel.name,
+                                      phone: sel.phone || "",
+                                      address: sel.address || "",
+                                      locked: sel.memos.length + sel.dues.length + sel.sales.length > 0,
+                                    })
+                                  }
+                                  className="px-2.5 py-1 rounded-full active:opacity-70 shrink-0"
+                                  style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12, fontWeight: 700 }}
+                                >
+                                  {sel.reg ? "✎ তথ্য বদলান" : "✎ রেজিস্টার করুন"}
+                                </button>
+                              )}
                             </div>
+                            <div style={{ fontSize: 13, color: GRAY, marginTop: 2 }}>{sel.phone ? `📞 ${sel.phone}` : "ফোন নম্বর নেই"}</div>
                             {sel.address && <div style={{ fontSize: 13, color: GRAY }}>📍 {sel.address}</div>}
+                            <div style={{ fontSize: 12.5, marginTop: 5, fontWeight: 600, color: lastUpdateColor(sel.lastVal) }}>
+                              🕒 শেষ আপডেট: {lastUpdateText(sel.lastVal)}
+                            </div>
+                            {!sel.reg && <div style={{ fontSize: 11.5, color: GRAY, marginTop: 2 }}>এখনো রেজিস্টার করা নেই</div>}
+                            {editMode && sel.reg && sel.memos.length + sel.dues.length + sel.sales.length === 0 && (
+                              <button onClick={() => deleteCustReg(sel)} className="mt-2" style={{ fontSize: 12, color: "var(--red)" }}>
+                                কাস্টমার মুছুন
+                              </button>
+                            )}
                           </div>
                           <div className="grid grid-cols-3 gap-2 mb-3">
                             {tile("মোট বিল", sel.billed, NAVY)}
@@ -4094,9 +5263,22 @@ export default function LedgerApp() {
                       const q = custQuery.trim().toLowerCase();
                       const list = custs
                         .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.phone || "").includes(q))
-                        .sort((a, b) => b.due - a.due || b.lastVal - a.lastVal);
+                        .sort((a, b) =>
+                          custSort === "recent" ? b.lastVal - a.lastVal : custSort === "name" ? a.name.localeCompare(b.name, "bn") : b.due - a.due || b.lastVal - a.lastVal
+                        );
                       return (
                         <>
+                          {editMode ? (
+                            <button
+                              onClick={() => setCustForm({ id: null, name: "", phone: "", address: "", locked: false })}
+                              className="w-full flex items-center justify-center gap-1.5 py-2.5 mb-3 rounded-xl active:opacity-80"
+                              style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}
+                            >
+                              <Plus size={16} /> নতুন কাস্টমার রেজিস্টার
+                            </button>
+                          ) : (
+                            <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 8 }}>নতুন কাস্টমার রেজিস্টার করতে এডিট মোড চালু করুন।</p>
+                          )}
                           <input
                             value={custQuery}
                             onChange={(e) => setCustQuery(e.target.value)}
@@ -4105,11 +5287,29 @@ export default function LedgerApp() {
                             style={{ border: "1px solid var(--line)", background: "var(--card)", fontSize: 13.5 }}
                           />
                           <p style={{ fontSize: 12, color: GRAY, marginBottom: 10 }}>
-                            মোট {toBn(custs.length)} জন · মোট বাকি ৳{toBn(fmt(custs.reduce((s, c) => s + c.due, 0)))} (বেশি বাকি আগে)
+                            মোট {toBn(custs.length)} জন · মোট বাকি ৳{toBn(fmt(custs.reduce((s, c) => s + c.due, 0)))}
                           </p>
+                          <div className="flex gap-2 mb-3">
+                            {[["due", "বাকি বেশি"], ["recent", "শেষ আপডেট"], ["name", "নাম"]].map(([id, label]) => (
+                              <button
+                                key={id}
+                                onClick={() => setCustSort(id)}
+                                className="px-3 py-1 rounded-full active:opacity-70"
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  border: "1px solid var(--navy-line)",
+                                  background: custSort === id ? "var(--navy-bg)" : "var(--card)",
+                                  color: custSort === id ? "#FFFFFF" : "var(--navy-fg)",
+                                }}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
                           {list.length === 0 ? (
                             <p style={{ fontSize: 12, color: GRAY }}>
-                              {custs.length === 0 ? "এখনও কোনো কাস্টমার নেই — কাস্টমার মেমো বানালে এখানে আসবে।" : "কাউকে পাওয়া যায়নি।"}
+                              {custs.length === 0 ? "এখনও কোনো কাস্টমার নেই — উপরের বাটনে রেজিস্টার করুন, বা মেমো বানালে এখানে আসবে।" : "কাউকে পাওয়া যায়নি।"}
                             </p>
                           ) : (
                             <div className="flex flex-col gap-2">
@@ -4131,6 +5331,10 @@ export default function LedgerApp() {
                                   <div className="mt-1" style={{ fontSize: 11, color: GRAY }}>
                                     {toBn(c.memos.length)} টা মেমো · বিল ৳{toBn(fmt(c.billed))} · জমা ৳{toBn(fmt(c.paid))}
                                     {c.phone ? ` · ${c.phone}` : ""}
+                                  </div>
+                                  <div className="mt-0.5" style={{ fontSize: 11.5, fontWeight: 600, color: lastUpdateColor(c.lastVal) }}>
+                                    🕒 শেষ আপডেট: {lastUpdateText(c.lastVal)}
+                                    {c.reg ? "" : " · রেজিস্টার নেই"}
                                   </div>
                                 </button>
                               ))}
