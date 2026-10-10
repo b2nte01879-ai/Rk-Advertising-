@@ -446,6 +446,9 @@ async function kget(key) {
 }
 // রাইট: ফোনে মিরর → (অন্য ডিভাইস বদলে দিলে মার্জ) → সার্ভার; ফেল হলে কিউতে (false)
 async function kset(key, value, opts = {}) {
+  if (key.startsWith("day:")) txCache = null;
+  const ym = /^(?:day|dues|yearstats|memos):(\d{4})/.exec(key);
+  if (ym) markYearSeen(Number(ym[1]));
   const prev = lsGet(key);
   lsSet(key, value);
   const baseHash = baseGet(key);
@@ -508,6 +511,90 @@ async function flushPendingWrites() {
   }
 }
 
+// ---------- গতি: যে বছরে ডেটা আছে শুধু সেগুলোই লোড, দিনের ডেটা প্যারালাল ----------
+const YEARS_SEEN_KEY = "rk-years-seen";
+const YEARS_SCAN_TTL = 3 * 86400000;
+let txCache = null; // সব লেনদেনের সেশন-ক্যাশ (দিনের ডেটা বদলালে মুছে যায়)
+let yearsScanPromise = null;
+function seenYears() {
+  try {
+    const o = JSON.parse(localStorage.getItem(YEARS_SEEN_KEY));
+    if (o && Array.isArray(o.years) && Date.now() - o.at < YEARS_SCAN_TTL) return o.years;
+  } catch (e) {
+    /* ignore */
+  }
+  return null;
+}
+function markYearSeen(y) {
+  try {
+    const o = JSON.parse(localStorage.getItem(YEARS_SEEN_KEY));
+    if (o && Array.isArray(o.years) && !o.years.includes(y)) {
+      o.years.push(y);
+      localStorage.setItem(YEARS_SEEN_KEY, JSON.stringify(o));
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+async function activeYears() {
+  const pick = (found) => YEARS.filter((y) => found.includes(y) || Math.abs(y - _NOW_YEAR) <= 1);
+  const seen = seenYears();
+  if (seen) return pick(seen);
+  if (!yearsScanPromise) {
+    yearsScanPromise = (async () => {
+      const found = [];
+      let allOk = true;
+      await Promise.all(
+        YEARS.map(async (y) => {
+          for (const k of [`dues:${y}`, `memos:${y}`, `yearstats:${y}`]) {
+            const r = await readRemote(k, 8000);
+            if (!r.ok) {
+              allOk = false;
+              return;
+            }
+            if (r.value && r.value !== "{}" && r.value !== "[]") {
+              found.push(y);
+              return;
+            }
+          }
+        })
+      );
+      if (allOk) {
+        try {
+          localStorage.setItem(YEARS_SEEN_KEY, JSON.stringify({ at: Date.now(), years: found }));
+        } catch (e) {
+          /* ignore */
+        }
+        return found;
+      }
+      return null;
+    })();
+    yearsScanPromise.then(
+      () => {
+        yearsScanPromise = null;
+      },
+      () => {
+        yearsScanPromise = null;
+      }
+    );
+  }
+  const found = await yearsScanPromise;
+  return found ? pick(found) : YEARS;
+}
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) {
+        const idx = i++;
+        out[idx] = await fn(items[idx], idx);
+      }
+    })
+  );
+  return out;
+}
+
 // ---------- ব্যাকআপ / স্ন্যাপশট / রিস্টোর ----------
 const FIXED_DATA_KEYS = ["manualdues", "presets:sale", "presets:expense", "shopinfo", "trash", "customers"];
 const isDataKey = (k) => FIXED_DATA_KEYS.includes(k) || /^(day|dues|yearstats|memos):/.test(k);
@@ -524,11 +611,13 @@ async function listAllDataKeys() {
     keys.add(`yearstats:${y}`);
     keys.add(`memos:${y}`);
   }
-  for (const y of YEARS) {
-    const r = await readRemote(`yearstats:${y}`, 8000);
-    const raw = r.ok && r.value ? r.value : lsGet(`yearstats:${y}`);
-    Object.keys(pj(raw, {})).forEach((k) => keys.add(`day:${y}-${k}`));
-  }
+  const statRaws = await Promise.all(
+    YEARS.map(async (y) => {
+      const r = await readRemote(`yearstats:${y}`, 8000);
+      return r.ok && r.value ? r.value : lsGet(`yearstats:${y}`);
+    })
+  );
+  YEARS.forEach((y, i) => Object.keys(pj(statRaws[i], {})).forEach((k) => keys.add(`day:${y}-${k}`)));
   // সাম্প্রতিক দুই মাসের সব দিন (স্ট্যাটস না থাকলেও ধরা পড়ে)
   const now = new Date();
   for (let back = 0; back < 2; back++) {
@@ -578,7 +667,7 @@ async function collectAllData(onProgress) {
       if (onProgress) onProgress(done, keys.length);
     }
   };
-  await Promise.all([worker(), worker(), worker(), worker(), worker()]);
+  await Promise.all([worker(), worker(), worker()]);
   return { data, failed, stale, total: keys.length };
 }
 async function buildBackupObject(onProgress) {
@@ -870,10 +959,15 @@ async function buildBackupCsv() {
       const [bm, bd] = b.split("-").map(Number);
       return am - bm || ad - bd;
     });
+    const dayCache = new Map();
+    await mapLimit(dateKeys, 12, async (dk) => {
+      const [mm2, dd2] = dk.split("-").map(Number);
+      dayCache.set(dk, await loadDay(y, mm2, dd2));
+    });
     for (const dk of dateKeys) {
       const [m, d] = dk.split("-").map(Number);
       const dateLabel = `${y}-${pad2(m)}-${pad2(d)}`;
-      const day = await loadDay(y, m, d);
+      const day = dayCache.get(dk);
       day.expenses.forEach((e) => {
         if (!e.name && !e.amount) return;
         rows.push([dateLabel, "খরচ", e.name, e.amount, "", "", "", "", "", "", ""]);
@@ -919,39 +1013,44 @@ async function buildBackupCsv() {
 }
 
 async function buildAllTransactions() {
-  const rows = [];
-  for (const y of YEARS) {
-    const stats = await loadYearStats(y);
-    const dateKeys = Object.keys(stats).sort((a, b) => {
-      const [am, ad] = a.split("-").map(Number);
-      const [bm, bd] = b.split("-").map(Number);
-      return am - bm || ad - bd;
-    });
-    for (const dk of dateKeys) {
+  if (txCache) return txCache;
+  const years = await activeYears();
+  const statsList = await Promise.all(years.map((y) => loadYearStats(y)));
+  const jobs = [];
+  years.forEach((y, i) =>
+    Object.keys(statsList[i]).forEach((dk) => {
       const [m, d] = dk.split("-").map(Number);
-      const day = await loadDay(y, m, d);
-      day.expenses.forEach((e) => {
-        if (!e.name && !e.amount) return;
-        rows.push({ y, m, d, type: "খরচ", name: e.name || "(নামহীন)", amount: num(e.amount) || 0, due: 0, discount: 0 });
+      jobs.push({ y, m, d });
+    })
+  );
+  jobs.sort((a, b) => a.y - b.y || a.m - b.m || a.d - b.d);
+  const days = await mapLimit(jobs, 12, (j) => loadDay(j.y, j.m, j.d));
+  const rows = [];
+  jobs.forEach((j, idx) => {
+    const { y, m, d } = j;
+    const day = days[idx];
+    day.expenses.forEach((e) => {
+      if (!e.name && !e.amount) return;
+      rows.push({ y, m, d, type: "খরচ", name: e.name || "(নামহীন)", amount: num(e.amount) || 0, due: 0, discount: 0 });
+    });
+    day.items.forEach((it) => {
+      if (!it.name && !it.height && !it.weight && !it.qty && !it.price && !it.due && !it.discount) return;
+      rows.push({
+        y,
+        m,
+        d,
+        type: "বিক্রি",
+        name: it.name || "(নামহীন)",
+        amount: netTotal(it),
+        due: dueRemaining(it),
+        discount: num(it.discount) || 0,
+        customer: (it.customer || "").trim(),
+        billed: grossTotal(it) - (num(it.discount) || 0),
+        paid: Math.max(0, grossTotal(it) - (num(it.discount) || 0) - dueRemaining(it)),
       });
-      day.items.forEach((it) => {
-        if (!it.name && !it.height && !it.weight && !it.qty && !it.price && !it.due && !it.discount) return;
-        rows.push({
-          y,
-          m,
-          d,
-          type: "বিক্রি",
-          name: it.name || "(নামহীন)",
-          amount: netTotal(it),
-          due: dueRemaining(it),
-          discount: num(it.discount) || 0,
-          customer: (it.customer || "").trim(),
-          billed: grossTotal(it) - (num(it.discount) || 0),
-          paid: Math.max(0, grossTotal(it) - (num(it.discount) || 0) - dueRemaining(it)),
-        });
-      });
-    }
-  }
+    });
+  });
+  txCache = rows;
   return rows;
 }
 
@@ -1029,7 +1128,8 @@ async function saveMemosYear(y, list) {
 }
 
 async function loadAllMemos() {
-  const results = await Promise.all(YEARS.map(loadMemosYear));
+  const years = await activeYears();
+  const results = await Promise.all(years.map(loadMemosYear));
   return results.flat();
 }
 
@@ -1049,16 +1149,16 @@ async function saveManualDues(list) {
 
 // বাকির লিস্ট = দৈনিক হিসাবের বাকি + সরাসরি যোগ করা বাকি (মেমো থেকে আসা সহ)
 async function loadAllDuesFlat() {
-  const results = await Promise.all(YEARS.map((y) => loadDues(y)));
+  const years = await activeYears();
+  const [results, manual] = await Promise.all([Promise.all(years.map((y) => loadDues(y))), loadManualDues()]);
   const flat = [];
   results.forEach((duesForYear, idx) => {
-    const y = YEARS[idx];
+    const y = years[idx];
     Object.entries(duesForYear).forEach(([k, entries]) => {
       const [m, d] = k.split("-").map(Number);
       entries.forEach((e) => flat.push({ y, m, d, ...e }));
     });
   });
-  const manual = await loadManualDues();
   manual.forEach((e) => flat.push({ ...e, manual: true }));
   flat.sort((a, b) => a.y - b.y || a.m - b.m || a.d - b.d);
   return flat;
@@ -3411,7 +3511,7 @@ export default function LedgerApp() {
     const t = setTimeout(async () => {
       const r = await runAutoProtection();
       if (r && r.status === "created") showToast("🛡 আজকের নিরাপত্তা-কপি নেওয়া হয়েছে");
-    }, 7000);
+    }, 30000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unlocked]);
