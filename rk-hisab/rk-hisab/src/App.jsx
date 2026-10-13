@@ -785,6 +785,172 @@ async function runAutoProtection() {
   }
   return res;
 }
+// ---------- Google Drive ব্যাকআপ (আপনার নিজের Google অ্যাকাউন্টে, Apps Script দিয়ে) ----------
+const DRIVE_CFG_KEY = "rk-drive-cfg";
+const DRIVE_SCRIPT = String.raw`var SECRET = "এখানে-নিজের-গোপন-কোড-লিখুন";
+var FOLDER_NAME = "RK হিসাব ব্যাকআপ";
+var KEEP = 30;
+
+function folder_() {
+  var it = DriveApp.getFoldersByName(FOLDER_NAME);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(FOLDER_NAME);
+}
+
+function out_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function list_(f) {
+  var arr = [];
+  var it = f.getFiles();
+  while (it.hasNext()) {
+    var x = it.next();
+    arr.push({ id: x.getId(), name: x.getName(), date: x.getLastUpdated().getTime(), size: x.getSize() });
+  }
+  arr.sort(function (a, b) { return b.date - a.date; });
+  return arr;
+}
+
+function trim_(f) {
+  var arr = list_(f);
+  for (var i = KEEP; i < arr.length; i++) DriveApp.getFileById(arr[i].id).setTrashed(true);
+}
+
+function doGet() {
+  return out_({ ok: true, hint: "POST only" });
+}
+
+function doPost(e) {
+  try {
+    var req = JSON.parse(e.postData.contents);
+    if (!req || req.secret !== SECRET) return out_({ ok: false, error: "secret" });
+    var f = folder_();
+    if (req.action === "ping") {
+      return out_({ ok: true, email: Session.getEffectiveUser().getEmail(), folder: f.getUrl() });
+    }
+    if (req.action === "backup") {
+      var name = String(req.name || "backup.json").replace(/[^\w.\-]/g, "_");
+      var it = f.getFilesByName(name);
+      var file;
+      if (it.hasNext()) {
+        file = it.next();
+        file.setContent(req.content);
+      } else {
+        file = f.createFile(name, req.content, MimeType.PLAIN_TEXT);
+      }
+      trim_(f);
+      return out_({ ok: true, id: file.getId(), name: file.getName(), size: file.getSize() });
+    }
+    if (req.action === "list") {
+      return out_({ ok: true, files: list_(f) });
+    }
+    if (req.action === "get") {
+      var fl = DriveApp.getFileById(req.id);
+      var inside = false;
+      var ps = fl.getParents();
+      while (ps.hasNext()) if (ps.next().getId() === f.getId()) inside = true;
+      if (!inside) return out_({ ok: false, error: "not-in-folder" });
+      return out_({ ok: true, content: fl.getBlob().getDataAsString("UTF-8") });
+    }
+    return out_({ ok: false, error: "unknown" });
+  } catch (err) {
+    return out_({ ok: false, error: String(err) });
+  }
+}
+`;
+function getDriveCfg() {
+  try {
+    const c = JSON.parse(localStorage.getItem(DRIVE_CFG_KEY));
+    return c && c.url && c.secret ? c : null;
+  } catch (e) {
+    return null;
+  }
+}
+function saveDriveCfg(c) {
+  try {
+    localStorage.setItem(DRIVE_CFG_KEY, JSON.stringify(c));
+  } catch (e) {
+    /* ignore */
+  }
+}
+function clearDriveCfg() {
+  try {
+    localStorage.removeItem(DRIVE_CFG_KEY);
+    localStorage.removeItem("rk-last-drive");
+    localStorage.removeItem("rk-drive-err");
+  } catch (e) {
+    /* ignore */
+  }
+}
+const lastDriveBackup = () => {
+  try {
+    return localStorage.getItem("rk-last-drive");
+  } catch (e) {
+    return null;
+  }
+};
+const lastDriveError = () => {
+  try {
+    return localStorage.getItem("rk-drive-err");
+  } catch (e) {
+    return null;
+  }
+};
+async function driveCall(action, payload = {}, ms = 90000) {
+  const cfg = getDriveCfg();
+  if (!cfg) throw new Error("not-configured");
+  const res = await withTimeout(
+    fetch(cfg.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ secret: cfg.secret, action, ...payload }), redirect: "follow" }),
+    ms
+  );
+  const j = await res.json();
+  if (!j || !j.ok) throw new Error((j && j.error) || "drive-error");
+  return j;
+}
+async function uploadBackupToDrive(obj) {
+  const name = `rk-hisab-backup-${obj.date || snapDateStr()}.json`;
+  const j = await driveCall("backup", { name, content: J(obj) }, 180000);
+  try {
+    localStorage.setItem("rk-last-drive", snapDateStr());
+    localStorage.removeItem("rk-drive-err");
+  } catch (e) {
+    /* ignore */
+  }
+  return j;
+}
+// প্রতিদিন একবার, নিরাপত্তা-কপির পরে নিজে থেকে Drive-এ পাঠানো
+async function ensureDriveBackup() {
+  if (!getDriveCfg()) return { status: "off" };
+  if (lastDriveBackup() === snapDateStr()) return { status: "done" };
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return { status: "offline" };
+  try {
+    let obj = null;
+    const idx = await readSnapIndex();
+    const entry = idx && idx.find((x) => x.date === snapDateStr());
+    if (entry) {
+      try {
+        obj = await loadServerSnapshot(entry);
+      } catch (e) {
+        obj = null;
+      }
+    }
+    if (!obj) {
+      const b = await buildBackupObject();
+      if (b.total && b.failed > b.total * 0.2) return { status: "partial" };
+      obj = b.obj;
+    }
+    await uploadBackupToDrive(obj);
+    return { status: "uploaded" };
+  } catch (e) {
+    try {
+      localStorage.setItem("rk-drive-err", String((e && e.message) || e));
+    } catch (e2) {
+      /* ignore */
+    }
+    return { status: "error", error: String((e && e.message) || e) };
+  }
+}
+
 const markFileBackup = () => {
   try {
     localStorage.setItem("rk-last-file-backup", snapDateStr());
@@ -933,6 +1099,76 @@ async function findOpeningBalance(y, m, d) {
     }
   }
   return 0;
+}
+
+// ---------- অবশিষ্ট (ব্যালেন্স) চেইন: আগের দিন বদলালে পরের সব দিন মিলিয়ে নেওয়া ----------
+const validNum = (v) => v !== null && v !== undefined && v !== "" && !isNaN(num(v));
+function chainBalances(entries, startBalance) {
+  let prev = startBalance;
+  return entries.map((e) => {
+    const opening = validNum(e.ov) ? num(e.ov) : prev;
+    const total = validNum(e.to) ? num(e.to) : opening + e.income;
+    const balance = total - e.expense;
+    prev = balance;
+    return { ...e, opening, balance };
+  });
+}
+// fromY/M/D দিলে: ওই দিনের পরের দিনগুলো; না দিলে: শুরু থেকে সব দিন। dryRun হলে শুধু কী বদলাবে তা বলে।
+async function rebalance({ fromY, fromM, fromD, dryRun } = {}) {
+  let yrs = fromY ? (await activeYears()).filter((y) => y >= fromY) : YEARS;
+  if (fromY && !yrs.includes(fromY)) yrs = [fromY, ...yrs];
+  const stats = {};
+  await Promise.all(
+    yrs.map(async (y) => {
+      stats[y] = await loadYearStats(y);
+    })
+  );
+  let list = [];
+  yrs.forEach((y) =>
+    Object.keys(stats[y]).forEach((k) => {
+      const [m, d] = k.split("-").map(Number);
+      list.push({ y, m, d });
+    })
+  );
+  list.sort((a, b) => a.y - b.y || a.m - b.m || a.d - b.d);
+  let startBalance = 0;
+  if (fromY) {
+    const own = stats[fromY] && stats[fromY][`${fromM}-${fromD}`];
+    startBalance = own && own.balance !== undefined ? own.balance : await findOpeningBalance(fromY, fromM, fromD);
+    list = list.filter((x) => x.y > fromY || (x.y === fromY && (x.m > fromM || (x.m === fromM && x.d > fromD))));
+  }
+  if (!list.length) return { changes: [], total: 0 };
+  const days = await mapLimit(list, 12, (j) => loadDay(j.y, j.m, j.d));
+  const entries = list.map((j, i) => {
+    const dd = days[i];
+    return {
+      ...j,
+      income: dd.items.reduce((sum, it) => sum + (netTotal(it) || 0), 0),
+      expense: dd.expenses.reduce((sum, e) => sum + (isNaN(num(e.amount)) ? 0 : num(e.amount)), 0),
+      ov: dd.openingOverride,
+      to: dd.totalOverride,
+    };
+  });
+  const out = chainBalances(entries, startBalance);
+  const changes = [];
+  const touched = new Set();
+  out.forEach((e) => {
+    const k = `${e.m}-${e.d}`;
+    const old = stats[e.y][k] || {};
+    if (old.balance !== e.balance || old.income !== e.income || old.expense !== e.expense) {
+      changes.push({ y: e.y, m: e.m, d: e.d, oldBalance: old.balance, newBalance: e.balance });
+      if (!dryRun) {
+        stats[e.y][k] = { income: e.income, expense: e.expense, balance: e.balance };
+        touched.add(e.y);
+      }
+    }
+  });
+  if (!dryRun && touched.size) {
+    for (const y of touched) {
+      await kset(yearStatsKey(y), JSON.stringify(stats[y]));
+    }
+  }
+  return { changes, total: list.length };
 }
 
 function sumYearStats(all) {
@@ -2519,6 +2755,11 @@ export default function LedgerApp() {
   const [lastEntry, setLastEntry] = useState(null);
   const [safety, setSafety] = useState(null);
   const [safetyBusy, setSafetyBusy] = useState("");
+  const [driveCfg, setDriveCfg] = useState(() => getDriveCfg());
+  const [driveForm, setDriveForm] = useState({ url: "", secret: "" });
+  const [driveFiles, setDriveFiles] = useState(null);
+  const [safetyJump, setSafetyJump] = useState(false);
+  const restoreRef = useRef(null);
 
   const [yearStats, setYearStats] = useState({ income: 0, expense: 0 });
   const [yearStatsLoading, setYearStatsLoading] = useState(false);
@@ -2657,6 +2898,11 @@ export default function LedgerApp() {
       });
     await saveDuesForDate(y, m, d, dueRows);
     await saveYearStatsForDate(y, m, d, itemsTotal, expenseTotal, remaining);
+    try {
+      await rebalance({ fromY: y, fromM: m, fromD: d });
+    } catch (e) {
+      /* ব্যালেন্স মেলানো ব্যর্থ হলেও সেভ হারায় না; 'হিসাব মিলিয়ে নিন' বাটনে ঠিক করা যায় */
+    }
   }
 
   async function settlePayment(dueEntry, py, pm, pd, amount) {
@@ -2755,6 +3001,112 @@ export default function LedgerApp() {
     }
     conflicts.sort((a, b) => b.at - a.at);
     setSafety({ idx, local, conflicts, fileDate: lastFileBackup(), pending: pendingCount() });
+  };
+  const driveErrText = (e) => {
+    const m = String((e && e.message) || e);
+    if (m === "secret") return "গোপন কোড মেলেনি — স্ক্রিপ্টের SECRET আর এখানে দেওয়া কোড একই হতে হবে।";
+    if (m === "timeout" || /Failed to fetch|NetworkError|Load failed/i.test(m)) return "Google-এর সাথে যোগাযোগ হয়নি — লিংকটা ঠিক আছে কিনা, 'Who has access: Anyone' দেওয়া আছে কিনা আর নেট ঠিক আছে কিনা দেখুন।";
+    return "Drive-এ কাজ হয়নি (" + m + ")।";
+  };
+  const connectDrive = async () => {
+    const url = (driveForm.url || "").trim();
+    const secret = (driveForm.secret || "").trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(url)) {
+      window.alert("লিংকটা ঠিক মনে হচ্ছে না। Deploy করার পর যে 'Web app URL' পেয়েছেন (…/exec দিয়ে শেষ) সেটা দিন।");
+      return;
+    }
+    if (!secret) {
+      window.alert("গোপন কোড লিখুন।");
+      return;
+    }
+    setSafetyBusy("Google-এর সাথে যাচাই হচ্ছে…");
+    try {
+      saveDriveCfg({ url, secret });
+      const j = await driveCall("ping", {}, 40000);
+      saveDriveCfg({ url, secret, email: j.email || "", folder: j.folder || "" });
+      setDriveCfg(getDriveCfg());
+      setDriveForm({ url: "", secret: "" });
+      showToast("✓ Google অ্যাকাউন্ট যুক্ত হয়েছে");
+      loadDriveFiles();
+    } catch (e) {
+      clearDriveCfg();
+      setDriveCfg(null);
+      window.alert(driveErrText(e));
+    } finally {
+      setSafetyBusy("");
+    }
+  };
+  const disconnectDrive = () => {
+    if (!window.confirm("Google Drive সংযোগ বিচ্ছিন্ন করবেন? Drive-এ আগে রাখা ফাইল থেকে যাবে, শুধু নতুন ব্যাকআপ আর যাবে না।")) return;
+    clearDriveCfg();
+    setDriveCfg(null);
+    setDriveFiles(null);
+  };
+  const loadDriveFiles = async () => {
+    if (!getDriveCfg()) return;
+    try {
+      const j = await driveCall("list", {}, 40000);
+      setDriveFiles(j.files || []);
+    } catch (e) {
+      setDriveFiles(null);
+    }
+  };
+  const driveBackupNow = async () => {
+    if (safetyBusy) return;
+    setSafetyBusy("ডেটা পড়া হচ্ছে…");
+    try {
+      const b = await buildBackupObject((d, t) => setSafetyBusy(`ডেটা পড়া হচ্ছে… ${toBn(d)}/${toBn(t)}`));
+      if (b.total && b.failed > b.total * 0.2) {
+        window.alert("অনেক ডেটা পড়া যায়নি (নেট সমস্যা) — নেট ঠিক হলে আবার চেষ্টা করুন।");
+        return;
+      }
+      setSafetyBusy("Drive-এ পাঠানো হচ্ছে…");
+      await uploadBackupToDrive(b.obj);
+      showToast("☁ Drive-এ ব্যাকআপ গেছে");
+      loadDriveFiles();
+    } catch (e) {
+      window.alert(driveErrText(e));
+    } finally {
+      setSafetyBusy("");
+      refreshSafety();
+    }
+  };
+  const restoreFromDrive = async (f) => {
+    if (needEdit()) return;
+    try {
+      setSafetyBusy("Drive থেকে নামানো হচ্ছে…");
+      const j = await driveCall("get", { id: f.id }, 180000);
+      const obj = JSON.parse(j.content);
+      setSafetyBusy("");
+      await runRestore(obj, `Drive: ${f.name}`);
+    } catch (e) {
+      setSafetyBusy("");
+      window.alert(driveErrText(e));
+    }
+  };
+  const fixBalances = async () => {
+    showToast("হিসাব মেলানো হচ্ছে…");
+    try {
+      const r = await rebalance({ dryRun: true });
+      if (!r.changes.length) {
+        showToast("✓ সব দিনের অবশিষ্ট ঠিক আছে");
+        return;
+      }
+      if (!editMode) {
+        window.alert(`${toBn(r.changes.length)} টা দিনের অবশিষ্ট মিলছে না। ঠিক করতে আগে এডিট মোড চালু করুন (পিন লাগবে), তারপর আবার চাপুন।`);
+        return;
+      }
+      const sample = r.changes
+        .slice(0, 6)
+        .map((c) => `${toBn(c.d)} ${MONTH_NAMES[c.m - 1]} ${toBn(c.y)}: ${c.oldBalance === undefined ? "—" : toBn(fmt(c.oldBalance))} → ${toBn(fmt(c.newBalance))}`)
+        .join("\n");
+      if (!window.confirm(`${toBn(r.changes.length)} টা দিনের অবশিষ্ট ঠিক করা হবে:\n\n${sample}${r.changes.length > 6 ? "\n…" : ""}\n\n(দিনের এন্ট্রি বদলাবে না, শুধু ইজা টাকা ও অবশিষ্ট মিলবে)। করবেন?`)) return;
+      await rebalance({});
+      if (year && month) setMonthEntries(await loadMonthEntries(year, month));
+      showToast(`✓ ${toBn(r.changes.length)} টা দিনের অবশিষ্ট ঠিক হয়েছে`);
+    } catch (e) {
+      window.alert("হিসাব মেলানো যায়নি — নেট দেখে আবার চেষ্টা করুন।");
+    }
   };
   const needEdit = () => {
     if (editMode) return false;
@@ -3511,6 +3863,8 @@ export default function LedgerApp() {
     const t = setTimeout(async () => {
       const r = await runAutoProtection();
       if (r && r.status === "created") showToast("🛡 আজকের নিরাপত্তা-কপি নেওয়া হয়েছে");
+      const dr = await ensureDriveBackup();
+      if (dr && dr.status === "uploaded") showToast("☁ আজকের ব্যাকআপ Google Drive-এ গেছে");
     }, 30000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3547,7 +3901,14 @@ export default function LedgerApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (view === "safety") refreshSafety();
+    if (view === "safety") {
+      refreshSafety();
+      loadDriveFiles();
+      if (safetyJump) {
+        setSafetyJump(false);
+        setTimeout(() => restoreRef.current && restoreRef.current.scrollIntoView({ behavior: "smooth", block: "start" }), 500);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
@@ -4076,6 +4437,7 @@ export default function LedgerApp() {
                         { label: "গ্রাহক লেজার / এন্ট্রি খুঁজুন", icon: <Search size={17} />, onClick: () => setView("ledger") },
                         { label: "রিসাইকেল বিন (মোছা ফেরত)", icon: <RotateCcw size={17} />, onClick: () => setView("trash") },
                         { label: "ডেটা সুরক্ষা ও ব্যাকআপ", icon: <Shield size={17} />, onClick: () => setView("safety") },
+                        { label: "হিসাব মিলিয়ে নিন (অবশিষ্ট ঠিক করুন)", icon: <BarChart3 size={17} />, onClick: fixBalances },
                         { label: "দোকানের তথ্য ও লোগো", icon: <Settings size={17} />, onClick: () => setView("settings") },
                         { label: "ডার্ক / লাইট মোড বদলান", icon: <Moon size={17} />, onClick: toggleTheme },
                         {
@@ -4111,57 +4473,6 @@ export default function LedgerApp() {
                     </div>
                   ))}
                 </div>
-
-                {/* শেষ হিসাব ওঠানো */}
-                <div className="px-5 py-3 mb-3 flex items-center justify-between" style={card}>
-                  <div style={{ color: GRAY, fontSize: 14 }}>🗓 শেষ হিসাব ওঠানো</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: lastEntry ? lastUpdateColor(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : GRAY }}>
-                    {lastEntry ? lastUpdateText(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : "—"}
-                  </div>
-                </div>
-
-                {/* ডেটা সুরক্ষা অবস্থা */}
-                {(() => {
-                  const fb = lastFileBackup();
-                  const fbDays = fb ? Math.floor((Date.now() - new Date(fb + "T00:00:00").getTime()) / 86400000) : null;
-                  const bad = pending > 0;
-                  const warn = !bad && (fbDays === null || fbDays >= 7);
-                  return (
-                    <button onClick={() => setView("safety")} className="w-full flex items-center justify-between px-5 py-3 mb-3 active:opacity-90" style={card}>
-                      <div className="text-left">
-                        <div style={{ color: NAVY, fontSize: 15, fontWeight: 700 }}>🛡 ডেটা সুরক্ষা</div>
-                        <div style={{ color: bad ? "var(--red)" : warn ? "var(--amber-text)" : "var(--green)", fontSize: 12.5, marginTop: 2, fontWeight: 600 }}>
-                          {bad
-                            ? `⏳ ${toBn(pending)} টা সেভ সার্ভারে যাওয়া বাকি`
-                            : fbDays === null
-                            ? "⚠ ব্যাকআপ ফাইল এখনও নামানো হয়নি"
-                            : fbDays >= 7
-                            ? `⚠ ব্যাকআপ ফাইল ${toBn(fbDays)} দিন আগের — নতুন নামান`
-                            : "✓ সুরক্ষিত — দৈনিক কপি চলছে"}
-                        </div>
-                      </div>
-                      <div style={{ color: GRAY, fontSize: 20 }}>›</div>
-                    </button>
-                  );
-                })()}
-
-                {/* বাকির লিস্ট */}
-                <button onClick={() => setView("dues")} className="w-full flex items-center justify-between px-5 py-4 mb-3 active:opacity-90" style={card}>
-                  <div className="text-left">
-                    <div style={{ color: NAVY, fontSize: 18, fontWeight: 700 }}>বাকির লিস্ট</div>
-                    <div style={{ color: GRAY, fontSize: 13, marginTop: 2 }}>
-                      {allDuesLoading
-                        ? "লোড হচ্ছে…"
-                        : (() => {
-                            const old15n = allDues.filter((e) => daysSince(e.y, e.m, e.d) >= 15).length;
-                            return `${toBn(allDues.length)} টা এন্ট্রি${old15n ? ` · ⚠ ${toBn(old15n)} টা ১৫+ দিনের পুরনো` : " · দেখতে ট্যাপ করুন"}`;
-                          })()}
-                    </div>
-                  </div>
-                  <div style={{ color: "var(--red)", fontSize: 21, fontWeight: 700 }}>
-                    {allDuesLoading ? "…" : money(allDues.reduce((a, e) => a + (e.amount || 0), 0))}
-                  </div>
-                </button>
 
                 {/* বছর বেছে নিন — ২টা ঘর: চলতি বছর | পরের বছরগুলো */}
                 <div className="px-5 py-4" style={card}>
@@ -4200,6 +4511,88 @@ export default function LedgerApp() {
                     </select>
                   </div>
                 </div>
+
+                {/* শেষ হিসাব ওঠানো */}
+                <div className="px-5 py-3 mb-3 flex items-center justify-between" style={card}>
+                  <div style={{ color: GRAY, fontSize: 14 }}>🗓 শেষ হিসাব ওঠানো</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: lastEntry ? lastUpdateColor(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : GRAY }}>
+                    {lastEntry ? lastUpdateText(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : "—"}
+                  </div>
+                </div>
+
+                {/* ডেটা সুরক্ষা অবস্থা */}
+                {(() => {
+                  const dayDiff = (ds) => (ds ? Math.floor((Date.now() - new Date(ds + "T00:00:00").getTime()) / 86400000) : null);
+                  const fbDays = dayDiff(lastFileBackup());
+                  const driveOn = !!driveCfg;
+                  const drDays = dayDiff(lastDriveBackup());
+                  const bad = pending > 0;
+                  const warn = !bad && (driveOn ? drDays === null || drDays >= 2 : fbDays === null || fbDays >= 7);
+                  const msg = bad
+                    ? `⏳ ${toBn(pending)} টা সেভ সার্ভারে যাওয়া বাকি`
+                    : driveOn
+                    ? drDays === null
+                      ? "⚠ Drive-এ এখনও ব্যাকআপ যায়নি"
+                      : drDays >= 2
+                      ? `⚠ Drive-এ শেষ ব্যাকআপ ${toBn(drDays)} দিন আগের`
+                      : "✓ সুরক্ষিত — Drive-এও কপি যাচ্ছে"
+                    : fbDays === null
+                    ? "⚠ Google অ্যাকাউন্ট যুক্ত নেই, ফাইল ব্যাকআপও নেওয়া হয়নি"
+                    : fbDays >= 7
+                    ? `⚠ ব্যাকআপ ফাইল ${toBn(fbDays)} দিন আগের — নতুন নামান`
+                    : "✓ সুরক্ষিত — দৈনিক কপি চলছে";
+                  return (
+                    <div className="mb-3 px-5 py-3" style={card}>
+                      <button onClick={() => setView("safety")} className="w-full flex items-center justify-between text-left active:opacity-90">
+                        <div>
+                          <div style={{ color: NAVY, fontSize: 15, fontWeight: 700 }}>🛡 ডেটা সুরক্ষা</div>
+                          <div style={{ color: bad ? "var(--red)" : warn ? "var(--amber-text)" : "var(--green)", fontSize: 12.5, marginTop: 2, fontWeight: 600 }}>{msg}</div>
+                        </div>
+                        <div style={{ color: GRAY, fontSize: 20 }}>›</div>
+                      </button>
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => {
+                            setSafetyJump(true);
+                            setView("safety");
+                          }}
+                          className="px-3 py-1.5 rounded-full active:opacity-70"
+                          style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12.5, fontWeight: 700 }}
+                        >
+                          ↩ ব্যাকআপ ফিরিয়ে আনুন
+                        </button>
+                        {!driveOn && (
+                          <button
+                            onClick={() => setView("safety")}
+                            className="px-3 py-1.5 rounded-full active:opacity-70"
+                            style={{ background: "var(--navy-bg)", color: "#FFFFFF", fontSize: 12.5, fontWeight: 700 }}
+                          >
+                            ☁ Google অ্যাকাউন্ট যুক্ত করুন
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* বাকির লিস্ট */}
+                <button onClick={() => setView("dues")} className="w-full flex items-center justify-between px-5 py-4 mb-3 active:opacity-90" style={card}>
+                  <div className="text-left">
+                    <div style={{ color: NAVY, fontSize: 18, fontWeight: 700 }}>বাকির লিস্ট</div>
+                    <div style={{ color: GRAY, fontSize: 13, marginTop: 2 }}>
+                      {allDuesLoading
+                        ? "লোড হচ্ছে…"
+                        : (() => {
+                            const old15n = allDues.filter((e) => daysSince(e.y, e.m, e.d) >= 15).length;
+                            return `${toBn(allDues.length)} টা এন্ট্রি${old15n ? ` · ⚠ ${toBn(old15n)} টা ১৫+ দিনের পুরনো` : " · দেখতে ট্যাপ করুন"}`;
+                          })()}
+                    </div>
+                  </div>
+                  <div style={{ color: "var(--red)", fontSize: 21, fontWeight: 700 }}>
+                    {allDuesLoading ? "…" : money(allDues.reduce((a, e) => a + (e.amount || 0), 0))}
+                  </div>
+                </button>
+
               </div>
             );
           })()}
@@ -5033,6 +5426,18 @@ export default function LedgerApp() {
             const fbDays = fb ? Math.floor((Date.now() - new Date(fb + "T00:00:00").getTime()) / 86400000) : null;
             const latest = safety && safety.idx && safety.idx[0];
             const localLatest = safety && safety.local.find((c) => c.name === "snap-latest");
+            const dLastDate = lastDriveBackup();
+            const dDays = dLastDate ? Math.floor((Date.now() - new Date(dLastDate + "T00:00:00").getTime()) / 86400000) : null;
+            const driveRowOk = !driveCfg ? null : dDays !== null && dDays < 2;
+            const driveRowText = !driveCfg
+              ? "যুক্ত করা নেই"
+              : dDays === null
+              ? lastDriveError()
+                ? "যায়নি — " + lastDriveError()
+                : "এখনও যায়নি"
+              : dDays === 0
+              ? "আজ ✓"
+              : `${toBn(dDays)} দিন আগে`;
             const row = (ok, label, value) => (
               <div className="flex items-start justify-between gap-3 py-1.5" style={{ borderTop: "1px solid var(--line2)" }}>
                 <div style={{ fontSize: 13, color: GRAY }}>{label}</div>
@@ -5083,7 +5488,57 @@ export default function LedgerApp() {
                           "ব্যাকআপ ফাইল (আপনার হাতে)",
                           fbDays === null ? "কখনো নামানো হয়নি" : fbDays === 0 ? "আজ ✓" : `${toBn(fbDays)} দিন আগে${fbDays >= 7 ? " — নতুন নামান" : ""}`
                         )}
+                        {row(driveRowOk, "Google Drive-এ শেষ ব্যাকআপ", driveRowText)}
                         {row(safety.conflicts.length === 0 ? true : null, "মিলিয়ে নেওয়া সংঘর্ষ", safety.conflicts.length === 0 ? "নেই ✓" : `${toBn(safety.conflicts.length)} টা (নিচে)`)}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl px-4 py-3 mb-3" style={box}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 6 }}>☁ Google অ্যাকাউন্ট ও Drive</div>
+                    {driveCfg ? (
+                      <>
+                        <div style={{ fontSize: 13, color: "var(--green)", fontWeight: 700 }}>✓ যুক্ত আছে{driveCfg.email ? `: ${driveCfg.email}` : ""}</div>
+                        <p style={{ fontSize: 11.5, color: GRAY, lineHeight: 1.6, margin: "4px 0 10px" }}>
+                          প্রতিদিন অ্যাপ খুললে নিজে থেকে ব্যাকআপ Drive-এর "RK হিসাব ব্যাকআপ" ফোল্ডারে যায় (শেষ ৩০টা রাখা হয়)। নেট না থাকলে পরের বার যাবে।
+                        </p>
+                        {btn("☁ এখনই Drive-এ পাঠান", driveBackupNow, true)}
+                        <button onClick={disconnectDrive} className="mt-1" style={{ fontSize: 12, color: "var(--red)" }}>
+                          সংযোগ বিচ্ছিন্ন করুন
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: 12, color: GRAY, lineHeight: 1.7, marginBottom: 8 }}>
+                          যে Google অ্যাকাউন্টের Drive-এ ব্যাকআপ রাখতে চান, সেটা দিয়ে একবার সেটআপ করুন:
+                          <br />১. ওই অ্যাকাউন্টে লগইন করে script.google.com খুলুন → "New project"।
+                          <br />২. নিচের "স্ক্রিপ্ট কপি করুন" চেপে পুরো লেখা বসান। উপরের SECRET-এ নিজের একটা গোপন কোড লিখুন।
+                          <br />৩. Deploy → New deployment → Web app → Execute as: <b>Me</b>, Who has access: <b>Anyone</b> → Deploy → অনুমতি (Authorize) দিন।
+                          <br />৪. যে "Web app URL" পাবেন আর গোপন কোড নিচে দিন।
+                        </p>
+                        {btn("📋 স্ক্রিপ্ট কপি করুন", async () => {
+                          try {
+                            await navigator.clipboard.writeText(DRIVE_SCRIPT);
+                            showToast("✓ স্ক্রিপ্ট কপি হয়েছে — Apps Script-এ বসান");
+                          } catch (e) {
+                            window.alert("কপি হয়নি — আমার দেওয়া drive-backup.gs ফাইল থেকে নিন।");
+                          }
+                        })}
+                        <input
+                          value={driveForm.url}
+                          onChange={(ev) => setDriveForm((p) => ({ ...p, url: ev.target.value }))}
+                          placeholder="Web app URL (https://script.google.com/macros/s/…/exec)"
+                          className="w-full px-3 py-2 rounded-xl outline-none mb-2"
+                          style={{ fontSize: 13, border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)" }}
+                        />
+                        <input
+                          value={driveForm.secret}
+                          onChange={(ev) => setDriveForm((p) => ({ ...p, secret: ev.target.value }))}
+                          placeholder="গোপন কোড (স্ক্রিপ্টের SECRET-এর মতোই)"
+                          className="w-full px-3 py-2 rounded-xl outline-none mb-2"
+                          style={{ fontSize: 13, border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)" }}
+                        />
+                        {btn("✓ সংযুক্ত করুন", connectDrive, true)}
                       </>
                     )}
                   </div>
@@ -5097,8 +5552,11 @@ export default function LedgerApp() {
                     </p>
                   </div>
 
-                  <div className="rounded-xl px-4 py-3 mb-3" style={box}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 6 }}>ফিরিয়ে আনুন (রিস্টোর)</div>
+                  <div ref={restoreRef} className="rounded-xl px-4 py-3 mb-3" style={box}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 2 }}>↩ ব্যাকআপ ফিরিয়ে আনুন (রিস্টোর)</div>
+                    <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 8, lineHeight: 1.6 }}>
+                      যেকোনো একটা উৎস বেছে নিন — Drive, ফাইল, সার্ভারের কপি বা এই ডিভাইসের কপি। ফেরানোর আগে বর্তমান অবস্থা আলাদা করে রাখা হয়, তাই ভুল হলে আবার আগের অবস্থায় ফেরা যায়।
+                    </p>
                     {!editMode && <p style={{ fontSize: 11.5, color: "var(--amber-text)", marginBottom: 8 }}>রিস্টোরের জন্য আগে এডিট মোড চালু করুন।</p>}
                     <label
                       className="block w-full py-3 rounded-xl text-center mb-2"
@@ -5117,6 +5575,27 @@ export default function LedgerApp() {
                         }}
                       />
                     </label>
+                    {driveCfg && (
+                      <>
+                        <div style={{ fontSize: 12.5, color: GRAY, margin: "10px 0 4px" }}>Google Drive-এর ব্যাকআপ</div>
+                        {driveFiles === null ? (
+                          <p style={{ fontSize: 12, color: GRAY }}>লোড হচ্ছে… (না এলে নেট দেখে পেজটা আবার খুলুন)</p>
+                        ) : driveFiles.length === 0 ? (
+                          <p style={{ fontSize: 12, color: GRAY }}>Drive-এ এখনও কোনো ব্যাকআপ নেই।</p>
+                        ) : (
+                          driveFiles.slice(0, 15).map((f) => (
+                            <div key={f.id} className="flex items-center justify-between py-1.5" style={{ borderTop: "1px solid var(--line2)" }}>
+                              <span style={{ fontSize: 13, color: "var(--ink)" }}>
+                                {f.name.replace("rk-hisab-backup-", "").replace(".json", "")} <span style={{ color: GRAY, fontSize: 11.5 }}>· {toBn(Math.max(1, Math.round((f.size || 0) / 1024)))} KB</span>
+                              </span>
+                              <button onClick={() => restoreFromDrive(f)} disabled={!!safetyBusy} className="px-3 py-1 rounded-full active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12, fontWeight: 700 }}>
+                                ফিরিয়ে আনুন
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </>
+                    )}
                     {safety && safety.idx && safety.idx.length > 0 && (
                       <>
                         <div style={{ fontSize: 12.5, color: GRAY, margin: "10px 0 4px" }}>সার্ভারের নিরাপত্তা-কপি</div>
