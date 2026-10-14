@@ -1171,6 +1171,31 @@ async function rebalance({ fromY, fromM, fromD, dryRun } = {}) {
   return { changes, total: list.length };
 }
 
+// চলতি মাসের সারাংশ: মোট বিক্রি, জমা, খরচ, বাকি
+async function computeMonthSummary(y, m) {
+  const stats = await loadYearStats(y);
+  const days = Object.keys(stats)
+    .map((k) => k.split("-").map(Number))
+    .filter(([mm]) => mm === m)
+    .map(([, d]) => d);
+  const loaded = await mapLimit(days, 12, (d) => loadDay(y, m, d));
+  let sale = 0;
+  let paid = 0;
+  let expense = 0;
+  let due = 0;
+  loaded.forEach((dd) => {
+    dd.items.forEach((it) => {
+      paid += netTotal(it) || 0;
+      due += dueRemaining(it) || 0;
+      if (!String(it.name || "").endsWith("(পরিশোধ)")) sale += grossTotal(it) - numOr0(it.discount);
+    });
+    dd.expenses.forEach((e) => {
+      expense += isNaN(num(e.amount)) ? 0 : num(e.amount);
+    });
+  });
+  return { y, m, sale, paid, expense, due, days: days.length };
+}
+
 function sumYearStats(all) {
   return Object.values(all).reduce(
     (acc, v) => ({ income: acc.income + (v.income || 0), expense: acc.expense + (v.expense || 0) }),
@@ -2410,11 +2435,28 @@ const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeh
 const HeaderBar = ({ title, onBack, editMode, onToggleMode, menuItems }) => (
   <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{ background: "var(--navy-bg)", color: "var(--on-navy)" }}>
     {menuItems && <HamburgerMenu items={menuItems} />}
-    {onBack && (
-      <button onClick={onBack} className="p-1 -ml-1 active:opacity-60">
-        <ChevronLeft size={22} />
-      </button>
-    )}
+    {onBack &&
+      createPortal(
+        <button
+          onClick={onBack}
+          aria-label="পিছনে যান"
+          className="rk-zoomable fixed flex items-center justify-center active:opacity-80"
+          style={{
+            zIndex: 55,
+            left: 14,
+            bottom: 20,
+            width: 52,
+            height: 52,
+            borderRadius: 999,
+            background: "var(--navy-bg)",
+            color: "#FFFFFF",
+            boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
+          }}
+        >
+          <ChevronLeft size={26} strokeWidth={2.4} />
+        </button>,
+        document.body
+      )}
     <BookOpen size={18} style={{ opacity: 0.85 }} />
     <h1 className="flex-1" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 19 }}>{title}</h1>
     <ThemeButton />
@@ -3108,6 +3150,27 @@ export default function LedgerApp() {
       window.alert("হিসাব মেলানো যায়নি — নেট দেখে আবার চেষ্টা করুন।");
     }
   };
+  const formRef = useRef(null);
+  const handleFormEnter = (e) => {
+    if (e.key !== "Enter" || e.defaultPrevented) return;
+    const t = e.target;
+    if (!t || t.tagName !== "INPUT" || !formRef.current) return;
+    const list = [...formRef.current.querySelectorAll("input:not([disabled])")].filter((i) => i.type !== "hidden");
+    const i = list.indexOf(t);
+    if (i < 0 || i === list.length - 1) return;
+    e.preventDefault();
+    const nx = list[i + 1];
+    nx.focus();
+    try {
+      nx.select();
+    } catch (err) {
+      /* ignore */
+    }
+  };
+  useEffect(() => {
+    if (!saleSheetOpen || !formRef.current) return;
+    formRef.current.querySelectorAll("input").forEach((i) => i.setAttribute("enterkeyhint", "next"));
+  });
   const needEdit = () => {
     if (editMode) return false;
     window.alert("রিস্টোরের মতো কাজের জন্য আগে এডিট মোড চালু করুন (পিন লাগবে)।");
@@ -3764,23 +3827,27 @@ export default function LedgerApp() {
     };
   }, [view]);
 
-  // আজকের সংক্ষিপ্ত হিসাব (হোম পেজে)
+  // চলতি মাসের সংক্ষিপ্ত হিসাব (হোম পেজে)
   useEffect(() => {
     if (view !== "years") return;
     let cancelled = false;
     const now = new Date();
     const ty = now.getFullYear();
     const tm = now.getMonth() + 1;
-    const td = now.getDate();
     if (!YEARS.includes(ty)) {
       setTodaySummary(null);
       return;
     }
     setTodayLoading(true);
     (async () => {
-      const full = await computeDayFull(ty, tm, td);
+      let sum = null;
+      try {
+        sum = await computeMonthSummary(ty, tm);
+      } catch (e) {
+        sum = null;
+      }
       if (!cancelled) {
-        setTodaySummary({ y: ty, m: tm, d: td, ...full });
+        setTodaySummary(sum);
         setTodayLoading(false);
       }
     })();
@@ -4075,6 +4142,8 @@ export default function LedgerApp() {
               }}
             >
               <div
+                ref={formRef}
+                onKeyDown={handleFormEnter}
                 className="rk-sheet-card w-full flex flex-col rounded-t-2xl sm:rounded-2xl"
                 style={{ maxWidth: 1100, background: "var(--bg)", border: "2.5px solid var(--navy-line)", fontFamily: "'Noto Sans Bengali', sans-serif" }}
               >
@@ -4141,7 +4210,7 @@ export default function LedgerApp() {
                     <div className="overflow-x-auto">
                       <div
                         className="grid items-center"
-                        style={{ gridTemplateColumns: "150px 48px 48px 56px 48px 56px 48px 48px 24px", background: "var(--orange-bg)", minWidth: 530 }}
+                        style={{ gridTemplateColumns: "150px 48px 48px 56px 48px 56px 48px 48px 24px minmax(150px, 1fr)", background: "var(--orange-bg)", minWidth: 700 }}
                       >
                         <Th>নাম</Th>
                         <Th right>হাইট</Th>
@@ -4152,15 +4221,16 @@ export default function LedgerApp() {
                         <Th right>বাকি</Th>
                         <Th right>ছাড়</Th>
                         <Th />
+                        <Th>ক্রেতা</Th>
                       </div>
                       {saleDrafts.map((row, idx) => (
                         <div
                           key={idx}
                           className="grid items-center"
                           style={{
-                            gridTemplateColumns: "150px 48px 48px 56px 48px 56px 48px 48px 24px",
+                            gridTemplateColumns: "150px 48px 48px 56px 48px 56px 48px 48px 24px minmax(150px, 1fr)",
                             background: "var(--card)",
-                            minWidth: 530,
+                            minWidth: 700,
                             borderTop: idx > 0 ? "1px solid var(--line2)" : "none",
                           }}
                         >
@@ -4216,31 +4286,28 @@ export default function LedgerApp() {
                           <button onClick={() => removeSaleDraftRow(idx)} className="flex items-center justify-center h-full" style={{ color: "var(--red)" }}>
                             <Trash2 size={15} />
                           </button>
-                          <div className="px-2 pb-2 pt-0.5 flex items-center gap-2" style={{ gridColumn: "1 / -1" }}>
-                            <span style={{ fontSize: 12, color: "var(--gray)", whiteSpace: "nowrap" }}>👤 ক্রেতা:</span>
-                            <div className="flex-1 min-w-0 rounded-xl" style={{ border: "1px solid var(--line)", background: "var(--bg)" }}>
-                              <NameInput
-                                value={row.customer || ""}
-                                onValue={(v) => updateSaleDraft(idx, "customer", v)}
-                                names={allCustomerNames}
-                                customNames={[]}
-                                onAdd={async (nm) => {
-                                  const n = await quickRegisterCustomer(nm);
-                                  if (n) updateSaleDraft(idx, "customer", n);
-                                }}
-                                onRemove={() => {}}
-                                addLabel="+ নতুন কাস্টমার যোগ করুন"
-                                placeholder="ক্রেতার নাম (বাকি থাকলে এই নামে বাকির লিস্টে যাবে)"
-                                inputClass="px-2 py-1.5"
-                                inputStyle={{ fontSize: 13.5, color: "var(--ink)" }}
-                              />
-                            </div>
-                          </div>
-                          {num(row.due) > 0 && !(row.customer || "").trim() && (
-                            <div className="px-3 pb-2" style={{ gridColumn: "1 / -1", fontSize: 11.5, color: "var(--red)" }}>
-                              ⚠ বাকি আছে — ক্রেতার নাম দিন, না হলে বাকি "{row.name || "নামহীন"}" নামে যাবে
-                            </div>
-                          )}
+                          {(() => {
+                            const needCust = num(row.due) > 0 && !(row.customer || "").trim();
+                            return (
+                              <div className="px-1 min-w-0" style={{ boxShadow: needCust ? "inset 0 0 0 1.5px var(--red)" : "none", borderRadius: 8 }}>
+                                <NameInput
+                                  value={row.customer || ""}
+                                  onValue={(v) => updateSaleDraft(idx, "customer", v)}
+                                  names={allCustomerNames}
+                                  customNames={[]}
+                                  onAdd={async (nm) => {
+                                    const n = await quickRegisterCustomer(nm);
+                                    if (n) updateSaleDraft(idx, "customer", n);
+                                  }}
+                                  onRemove={() => {}}
+                                  addLabel="+ নতুন কাস্টমার যোগ করুন"
+                                  placeholder={needCust ? "ক্রেতা দিন (বাকি আছে)" : "ক্রেতার নাম"}
+                                  inputClass="px-1.5 py-2"
+                                  inputStyle={{ fontSize: 14, color: needCust ? "var(--red)" : "var(--ink)" }}
+                                />
+                              </div>
+                            );
+                          })()}
                         </div>
                       ))}
                     </div>
@@ -4382,23 +4449,20 @@ export default function LedgerApp() {
             const NAVY = "var(--navy-fg)";
             const GRAY = "var(--gray)";
             const s = todaySummary;
-            const sale = s
-              ? s.items
-                  .filter((it) => !String(it.name || "").endsWith("(পরিশোধ)"))
-                  .reduce((a, it) => a + grossTotal(it) - numOr0(it.discount), 0)
-              : 0;
-            const paid = s ? s.itemsTotal : 0;
-            const expense = s ? s.expenseTotal : 0;
-            const dueToday = s ? s.items.reduce((a, it) => a + dueRemaining(it), 0) : 0;
+            const sale = s ? s.sale : 0;
+            const paid = s ? s.paid : 0;
+            const expense = s ? s.expense : 0;
+            const dueToday = s ? s.due : 0;
             const profit = sale - expense;
+            const monthName = MONTH_NAMES[new Date().getMonth()];
             const money = (n) => `${n < 0 ? "−" : ""}৳ ${toBn(fmt(Math.abs(n)))}`;
             const val = (n) => (!s ? "—" : todayLoading ? "…" : money(n));
             const card = { background: "var(--card)", borderRadius: 22 };
             const stats = [
-              { label: "মোট জমা", value: paid, color: "var(--green)", icon: <Wallet size={28} strokeWidth={1.8} /> },
-              { label: "মোট খরচ", value: expense, color: "var(--orange)", icon: <Receipt size={28} strokeWidth={1.8} /> },
-              { label: "বাকি টাকা", value: dueToday, color: "var(--red)", icon: <Clock size={28} strokeWidth={1.8} /> },
-              { label: "আনুমানিক লাভ", value: profit, color: "var(--blue)", icon: <BarChart3 size={28} strokeWidth={1.8} /> },
+              { label: "মাসের মোট জমা", value: paid, color: "var(--green)", icon: <Wallet size={22} strokeWidth={1.8} /> },
+              { label: "মাসের মোট খরচ", value: expense, color: "var(--orange)", icon: <Receipt size={22} strokeWidth={1.8} /> },
+              { label: "মাসের বাকি টাকা", value: dueToday, color: "var(--red)", icon: <Clock size={22} strokeWidth={1.8} /> },
+              { label: "মাসের আনুমানিক লাভ", value: profit, color: "var(--blue)", icon: <BarChart3 size={22} strokeWidth={1.8} /> },
             ];
             const goToday = () => {
               const now = new Date();
@@ -4454,22 +4518,22 @@ export default function LedgerApp() {
                   </div>
                 </div>
 
-                {/* আজকের মোট বিক্রি */}
-                <button onClick={goToday} className="w-full text-left px-5 py-5 mb-3 active:opacity-90" style={card}>
-                  <div style={{ color: GRAY, fontSize: 19 }}>আজকের মোট বিক্রি</div>
-                  <div style={{ color: NAVY, fontSize: 40, fontWeight: 700, lineHeight: 1.2, marginTop: 8 }}>{val(sale)}</div>
-                  <div className="flex items-center gap-1.5 mt-3" style={{ color: "var(--green2)", fontSize: 16 }}>
-                    <TrendingUp size={19} strokeWidth={2} /> দৈনিক বিক্রির সারাংশ
+                {/* চলতি মাসের মোট বিক্রি */}
+                <button onClick={goToday} className="w-full text-left px-4 py-3.5 mb-3 active:opacity-90" style={card}>
+                  <div style={{ color: GRAY, fontSize: 16 }}>{monthName} মাসের মোট বিক্রি</div>
+                  <div style={{ color: NAVY, fontSize: 32, fontWeight: 700, lineHeight: 1.2, marginTop: 4 }}>{val(sale)}</div>
+                  <div className="flex items-center gap-1.5 mt-2" style={{ color: "var(--green2)", fontSize: 14 }}>
+                    <TrendingUp size={16} strokeWidth={2} /> পুরো মাসের বিক্রির সারাংশ
                   </div>
                 </button>
 
-                {/* ২×২ কার্ড */}
-                <div className="grid grid-cols-2 gap-3 mb-3">
+                {/* মাসের ৪টা কার্ড (মোবাইলে ২×২, পিসিতে এক সারিতে) */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
                   {stats.map((st) => (
-                    <div key={st.label} className="px-4 py-4" style={{ ...card, color: st.color }}>
+                    <div key={st.label} className="px-3.5 py-3" style={{ ...card, color: st.color }}>
                       {st.icon}
-                      <div style={{ color: GRAY, fontSize: 17, marginTop: 8 }}>{st.label}</div>
-                      <div style={{ fontSize: 25, fontWeight: 700, marginTop: 8, lineHeight: 1.2 }}>{val(st.value)}</div>
+                      <div style={{ color: GRAY, fontSize: 14.5, marginTop: 4 }}>{st.label}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, lineHeight: 1.2 }}>{val(st.value)}</div>
                     </div>
                   ))}
                 </div>
