@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu, LayoutGrid, TrendingUp, Wallet, Receipt, Clock, BarChart3, Users, Settings, Share2, MessageCircle, MessageSquare, Phone, RotateCcw, Moon, Sun, ShoppingBag, Shield } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronDown, BookOpen, Pencil, Eye, Download, Search, Printer, FileText, Menu, LayoutGrid, TrendingUp, Wallet, Receipt, Clock, BarChart3, Users, Settings, Share2, MessageCircle, MessageSquare, Phone, RotateCcw, Moon, Sun, ShoppingBag, Shield, UserCheck } from "lucide-react";
 import { storage } from "./firebase";
 
 // ---------- constants ----------
@@ -285,6 +285,29 @@ function merge3Map(b, m, r) {
   return out;
 }
 const scalar3 = (b, m, r) => (sameJ(m, b) ? r : sameJ(r, b) ? m : r);
+function merge3Deep(b, m, r, depth) {
+  const B = b || {};
+  const M = m || {};
+  const R = r || {};
+  const isObj = (x) => x && typeof x === "object" && !Array.isArray(x);
+  const out = {};
+  new Set([...Object.keys(R), ...Object.keys(M)]).forEach((k) => {
+    const inB = k in B;
+    const inM = k in M;
+    const inR = k in R;
+    if (inM && inR) {
+      if (depth > 0 && isObj(M[k]) && isObj(R[k])) out[k] = merge3Deep(B[k], M[k], R[k], depth - 1);
+      else if (!inB || sameJ(M[k], B[k])) out[k] = R[k];
+      else if (sameJ(R[k], B[k])) out[k] = M[k];
+      else out[k] = R[k];
+    } else if (inM) {
+      if (!inB || !sameJ(M[k], B[k])) out[k] = M[k];
+    } else if (inR) {
+      if (!inB || !sameJ(R[k], B[k])) out[k] = R[k];
+    }
+  });
+  return out;
+}
 function mergeValues(key, baseStr, mineStr, remoteStr) {
   const m = pj(mineStr, undefined);
   const r = pj(remoteStr, undefined);
@@ -310,7 +333,9 @@ function mergeValues(key, baseStr, mineStr, remoteStr) {
       return J(out);
     }
     if (key.startsWith("yearstats:") || key === "shopinfo") return J(merge3Map(b, m, r));
-    if (key.startsWith("memos:") || key === "manualdues" || key === "trash" || key === "customers" || key.startsWith("presets:"))
+    if (key.startsWith("attend:")) return J(merge3Deep(b, m, r, 2));
+    if (key.startsWith("salary:")) return J(merge3Deep(b, m, r, 1));
+    if (key.startsWith("memos:") || key === "manualdues" || key === "trash" || key === "customers" || key === "staff" || key === "staffadv" || key.startsWith("presets:"))
       return J(merge3List(Array.isArray(b) ? b : null, Array.isArray(m) ? m : [], Array.isArray(r) ? r : []));
   } catch (e) {
     return null;
@@ -447,7 +472,7 @@ async function kget(key) {
 // রাইট: ফোনে মিরর → (অন্য ডিভাইস বদলে দিলে মার্জ) → সার্ভার; ফেল হলে কিউতে (false)
 async function kset(key, value, opts = {}) {
   if (key.startsWith("day:")) txCache = null;
-  const ym = /^(?:day|dues|yearstats|memos):(\d{4})/.exec(key);
+  const ym = /^(?:day|dues|yearstats|memos|attend|salary):(\d{4})/.exec(key);
   if (ym) markYearSeen(Number(ym[1]));
   const prev = lsGet(key);
   lsSet(key, value);
@@ -596,8 +621,8 @@ async function mapLimit(items, limit, fn) {
 }
 
 // ---------- ব্যাকআপ / স্ন্যাপশট / রিস্টোর ----------
-const FIXED_DATA_KEYS = ["manualdues", "presets:sale", "presets:expense", "shopinfo", "trash", "customers"];
-const isDataKey = (k) => FIXED_DATA_KEYS.includes(k) || /^(day|dues|yearstats|memos):/.test(k);
+const FIXED_DATA_KEYS = ["manualdues", "presets:sale", "presets:expense", "shopinfo", "trash", "customers", "staff", "staffadv"];
+const isDataKey = (k) => FIXED_DATA_KEYS.includes(k) || /^(day|dues|yearstats|memos|attend|salary):/.test(k);
 const SNAP_INDEX = "snap:index";
 const SNAP_CHUNK = 250000;
 const KEEP_DAILY = 14;
@@ -610,6 +635,8 @@ async function listAllDataKeys() {
     keys.add(`dues:${y}`);
     keys.add(`yearstats:${y}`);
     keys.add(`memos:${y}`);
+    keys.add(`attend:${y}`);
+    keys.add(`salary:${y}`);
   }
   const statRaws = await Promise.all(
     YEARS.map(async (y) => {
@@ -1169,6 +1196,66 @@ async function rebalance({ fromY, fromM, fromD, dryRun } = {}) {
     }
   }
   return { changes, total: list.length };
+}
+
+// ---------- স্টাফ হাজিরা, অ্যাডভান্স ও বেতন ----------
+const STAFF_KEY = "staff";
+const STAFF_ADV_KEY = "staffadv";
+async function loadJsonList(key) {
+  const v = pj(await kget(key), []);
+  return Array.isArray(v) ? v : [];
+}
+async function loadJsonObj(key) {
+  const v = pj(await kget(key), {});
+  return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+}
+const loadStaff = () => loadJsonList(STAFF_KEY);
+const saveStaff = (list) => kset(STAFF_KEY, J(list));
+const loadStaffAdv = () => loadJsonList(STAFF_ADV_KEY);
+const saveStaffAdv = (list) => kset(STAFF_ADV_KEY, J(list));
+const loadAttend = (y) => loadJsonObj(`attend:${y}`);
+const saveAttend = (y, o) => kset(`attend:${y}`, J(o));
+const loadSalaryRec = (y) => loadJsonObj(`salary:${y}`);
+const saveSalaryRec = (y, o) => kset(`salary:${y}`, J(o));
+const ATT_NEXT = { "": "P", P: "A", A: "H", H: "" };
+
+// এক স্টাফের এক মাসের হিসাব: উপস্থিত/অর্ধ/অনুপস্থিত দিন ও হাজিরা অনুযায়ী বেতন
+function staffMonthCalc(st, monthAtt, y, m) {
+  const n = daysInMonth(y, m);
+  const att = monthAtt || {};
+  let p = 0;
+  let h = 0;
+  let a = 0;
+  for (let d = 1; d <= n; d++) {
+    const v = att[d];
+    if (v === "P") p++;
+    else if (v === "H") h++;
+    else if (v === "A") a++;
+  }
+  const units = p + h * 0.5;
+  const sal = num(st.salary) || 0;
+  const rate = st.type === "daily" ? sal : sal / n;
+  return { n, p, h, a, unmarked: n - p - h - a, units, rate, gross: Math.round(rate * units) };
+}
+const advLeft = (a) => Math.max(0, (a.amount || 0) - (a.settled || 0));
+const advOutstanding = (advs, staffId) => advs.filter((a) => a.staffId === staffId).reduce((s, a) => s + advLeft(a), 0);
+// বেতন থেকে অ্যাডভান্স কাটা: পুরনো অ্যাডভান্স আগে; বেতনের বেশি কাটা যায় না, বাকিটা পরের মাসে যায়
+function planPayment(gross, advs, staffId) {
+  const list = advs
+    .filter((a) => a.staffId === staffId && advLeft(a) > 0)
+    .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+  let left = gross;
+  const parts = [];
+  for (const a of list) {
+    if (left <= 0) break;
+    const take = Math.min(left, advLeft(a));
+    if (take > 0) {
+      parts.push({ id: a.id, amt: take });
+      left -= take;
+    }
+  }
+  const deduct = parts.reduce((s, p) => s + p.amt, 0);
+  return { deduct, parts, net: gross - deduct };
 }
 
 // চলতি মাসের সারাংশ: মোট বিক্রি, জমা, খরচ, বাকি
@@ -2801,6 +2888,18 @@ export default function LedgerApp() {
   const [driveForm, setDriveForm] = useState({ url: "", secret: "" });
   const [driveFiles, setDriveFiles] = useState(null);
   const [safetyJump, setSafetyJump] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const [staffAdv, setStaffAdv] = useState([]);
+  const [attendY, setAttendY] = useState({});
+  const [salaryY, setSalaryY] = useState({});
+  const [staffYM, setStaffYM] = useState(() => ({ y: _NOW_YEAR, m: new Date().getMonth() + 1 }));
+  const [staffForm, setStaffForm] = useState(null);
+  const [staffOpen, setStaffOpen] = useState(null);
+  const [payForm, setPayForm] = useState(null);
+  const [advForm, setAdvForm] = useState(null);
+  const [showInactive, setShowInactive] = useState(false);
+  const [staffLoading, setStaffLoading] = useState(false);
+  const attQueue = useRef(Promise.resolve());
   const restoreRef = useRef(null);
 
   const [yearStats, setYearStats] = useState({ income: 0, expense: 0 });
@@ -3171,6 +3270,187 @@ export default function LedgerApp() {
     if (!saleSheetOpen || !formRef.current) return;
     formRef.current.querySelectorAll("input").forEach((i) => i.setAttribute("enterkeyhint", "next"));
   });
+  // ---- স্টাফ: দিনের খরচের সারিতে বেতন/অ্যাডভান্স লেখা ও মোছা ----
+  const upsertDayExpense = async (yy, mm, dd, row) => {
+    const raw = await loadDay(yy, mm, dd);
+    const expenses = [...raw.expenses.filter(isMeaningfulExpense).filter((r) => r.id !== row.id), row];
+    await recomputeAndSaveDay(yy, mm, dd, { ...raw, expenses });
+  };
+  const removeDayExpense = async (yy, mm, dd, id) => {
+    const raw = await loadDay(yy, mm, dd);
+    if (!raw.expenses.some((r) => r.id === id)) return;
+    await recomputeAndSaveDay(yy, mm, dd, { ...raw, expenses: raw.expenses.filter(isMeaningfulExpense).filter((r) => r.id !== id) });
+  };
+  const parseYmd = (ds) => {
+    const [yy, mm, dd] = String(ds || "").split("-").map(Number);
+    return yy && mm && dd ? { yy, mm, dd } : null;
+  };
+
+  const loadStaffAll = async (yy) => {
+    setStaffLoading(true);
+    try {
+      const [list, adv, att, sal] = await Promise.all([loadStaff(), loadStaffAdv(), loadAttend(yy), loadSalaryRec(yy)]);
+      setStaffList(list);
+      setStaffAdv(adv);
+      setAttendY(att);
+      setSalaryY(sal);
+    } finally {
+      setStaffLoading(false);
+    }
+  };
+
+  const saveStaffForm = async () => {
+    const f = staffForm;
+    if (!f) return;
+    const name = (f.name || "").trim();
+    const salary = num(f.salary);
+    if (!name) {
+      window.alert("স্টাফের নাম লিখুন।");
+      return;
+    }
+    if (!(salary > 0)) {
+      window.alert("বেতনের টাকা লিখুন (০-এর বেশি)।");
+      return;
+    }
+    if (staffList.some((s) => custKey(s.name) === custKey(name) && s.id !== f.id && s.active !== false) && !window.confirm("এই নামে আরেকজন চালু স্টাফ আছে। তবুও যোগ করবেন?")) return;
+    const rec = { name, phone: (f.phone || "").trim(), type: f.type === "daily" ? "daily" : "monthly", salary: String(salary), active: f.active !== false };
+    const list = f.id ? staffList.map((s) => (s.id === f.id ? { ...s, ...rec } : s)) : [...staffList, { id: emptyRowId(), ...rec, at: Date.now() }];
+    const ok = await saveStaff(list);
+    setStaffList(list);
+    setStaffForm(null);
+    showToast(ok ? "✓ স্টাফ সেভ হয়েছে" : "ফোনে সেভ হয়েছে — নেট এলে সার্ভারে যাবে");
+  };
+
+  const applyAttend = (stId, d, value) => {
+    if (!editMode) return;
+    const { y, m } = staffYM;
+    setAttendY((p) => {
+      const q = JSON.parse(JSON.stringify(p));
+      q[m] = q[m] || {};
+      q[m][stId] = q[m][stId] || {};
+      if (value) q[m][stId][d] = value;
+      else delete q[m][stId][d];
+      return q;
+    });
+    attQueue.current = attQueue.current.then(async () => {
+      const fresh = await loadAttend(y);
+      fresh[m] = fresh[m] || {};
+      fresh[m][stId] = fresh[m][stId] || {};
+      if (value) fresh[m][stId][d] = value;
+      else delete fresh[m][stId][d];
+      const ok = await saveAttend(y, fresh);
+      if (!ok) showToast("ফোনে সেভ হয়েছে — নেট এলে সার্ভারে যাবে");
+    });
+  };
+  const cycleAttend = (stId, d) => {
+    const cur = ((attendY[staffYM.m] || {})[stId] || {})[d] || "";
+    applyAttend(stId, d, ATT_NEXT[cur]);
+  };
+
+  const addAdvance = async (st) => {
+    const f = advForm;
+    const amount = num(f && f.amount);
+    const dt = parseYmd(f && f.date);
+    if (!(amount > 0) || !dt) {
+      window.alert("অ্যাডভান্সের টাকা আর তারিখ দিন।");
+      return;
+    }
+    const id = emptyRowId();
+    const adv = { id, staffId: st.id, date: f.date, amount, settled: 0, note: (f.note || "").trim(), expId: `adv-${id}` };
+    try {
+      await upsertDayExpense(dt.yy, dt.mm, dt.dd, { id: adv.expId, name: `অ্যাডভান্স — ${st.name}`, amount: String(amount) });
+      const list = [...staffAdv, adv];
+      await saveStaffAdv(list);
+      setStaffAdv(list);
+      setAdvForm(null);
+      showToast(`✓ অ্যাডভান্স ৳${toBn(fmt(amount))} লেখা হয়েছে (${toBn(dt.dd)} ${MONTH_NAMES[dt.mm - 1]} এর খরচে)`);
+    } catch (e) {
+      window.alert("অ্যাডভান্স সেভ হয়নি — নেট দেখে আবার চেষ্টা করুন।");
+    }
+  };
+  const deleteAdvance = async (adv) => {
+    if ((adv.settled || 0) > 0) {
+      window.alert("এই অ্যাডভান্সের কিছু অংশ বেতন থেকে কাটা হয়ে গেছে, তাই মোছা যাবে না। আগে ওই মাসের বেতন 'বাতিল' করুন।");
+      return;
+    }
+    if (!window.confirm(`৳${fmt(adv.amount)} অ্যাডভান্স মুছবেন? ওই দিনের খরচ থেকেও বাদ যাবে।`)) return;
+    const dt = parseYmd(adv.date);
+    try {
+      if (dt) await removeDayExpense(dt.yy, dt.mm, dt.dd, adv.expId);
+      const list = staffAdv.filter((a) => a.id !== adv.id);
+      await saveStaffAdv(list);
+      setStaffAdv(list);
+      showToast("অ্যাডভান্স মুছে ফেলা হয়েছে");
+    } catch (e) {
+      window.alert("মোছা যায়নি — আবার চেষ্টা করুন।");
+    }
+  };
+
+  const paySalary = async (st) => {
+    const { y, m } = staffYM;
+    const f = payForm;
+    const dt = parseYmd(f && f.date);
+    if (!dt) {
+      window.alert("বেতন দেওয়ার তারিখ দিন।");
+      return;
+    }
+    const calc = staffMonthCalc(st, (attendY[m] || {})[st.id], y, m);
+    const plan = planPayment(calc.gross, staffAdv, st.id);
+    const amount = f.amount === "" || f.amount === undefined ? plan.net : num(f.amount);
+    if (isNaN(amount) || amount < 0) {
+      window.alert("টাকার পরিমাণ ঠিক নয়।");
+      return;
+    }
+    if (calc.gross === 0 && !window.confirm("এই মাসে কোনো উপস্থিতি লেখা নেই, বেতন ৳০। তবুও 'দেওয়া হয়েছে' লিখবেন?")) return;
+    const payId = emptyRowId();
+    const expId = `salary-${payId}`;
+    try {
+      if (amount > 0) await upsertDayExpense(dt.yy, dt.mm, dt.dd, { id: expId, name: `বেতন — ${st.name} (${MONTH_NAMES[m - 1]} ${toBn(y)})`, amount: String(amount) });
+      const advList = staffAdv.map((a) => {
+        const part = plan.parts.find((p) => p.id === a.id);
+        return part ? { ...a, settled: (a.settled || 0) + part.amt } : a;
+      });
+      if (plan.parts.length) {
+        await saveStaffAdv(advList);
+        setStaffAdv(advList);
+      }
+      const all = await loadSalaryRec(y);
+      all[m] = all[m] || {};
+      all[m][st.id] = { id: payId, date: f.date, gross: calc.gross, units: calc.units, deduct: plan.deduct, parts: plan.parts, net: amount, expId: amount > 0 ? expId : null };
+      await saveSalaryRec(y, all);
+      setSalaryY(all);
+      setPayForm(null);
+      showToast(`✓ ${st.name} এর বেতন ৳${toBn(fmt(amount))} — ${toBn(dt.dd)} ${MONTH_NAMES[dt.mm - 1]} এর খরচে ওঠানো হয়েছে`);
+    } catch (e) {
+      window.alert("বেতন সেভ হয়নি — নেট দেখে আবার চেষ্টা করুন (আগে 'ডেটা সুরক্ষা' দেখুন কিছু অর্ধেক হয়েছে কিনা)।");
+    }
+  };
+  const undoSalary = async (st) => {
+    const { y, m } = staffYM;
+    const rec = ((salaryY[m] || {})[st.id]) || null;
+    if (!rec) return;
+    if (!window.confirm(`${st.name} এর ${MONTH_NAMES[m - 1]} মাসের বেতন 'দেওয়া হয়েছে' বাতিল করবেন? খরচের সারিটাও মুছে যাবে আর কাটা অ্যাডভান্স আবার বাকি হবে।`)) return;
+    try {
+      const dt = parseYmd(rec.date);
+      if (dt && rec.expId) await removeDayExpense(dt.yy, dt.mm, dt.dd, rec.expId);
+      if (rec.parts && rec.parts.length) {
+        const advList = staffAdv.map((a) => {
+          const part = rec.parts.find((p) => p.id === a.id);
+          return part ? { ...a, settled: Math.max(0, (a.settled || 0) - part.amt) } : a;
+        });
+        await saveStaffAdv(advList);
+        setStaffAdv(advList);
+      }
+      const all = await loadSalaryRec(y);
+      if (all[m]) delete all[m][st.id];
+      await saveSalaryRec(y, all);
+      setSalaryY(all);
+      showToast("বেতন বাতিল হয়েছে");
+    } catch (e) {
+      window.alert("বাতিল হয়নি — আবার চেষ্টা করুন।");
+    }
+  };
+
   const needEdit = () => {
     if (editMode) return false;
     window.alert("রিস্টোরের মতো কাজের জন্য আগে এডিট মোড চালু করুন (পিন লাগবে)।");
@@ -3968,6 +4248,10 @@ export default function LedgerApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
+    if (view === "staff") loadStaffAll(staffYM.y);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, staffYM.y]);
+  useEffect(() => {
     if (view === "safety") {
       refreshSafety();
       loadDriveFiles();
@@ -4503,7 +4787,7 @@ export default function LedgerApp() {
                         { label: "ডেটা সুরক্ষা ও ব্যাকআপ", icon: <Shield size={17} />, onClick: () => setView("safety") },
                         { label: "হিসাব মিলিয়ে নিন (অবশিষ্ট ঠিক করুন)", icon: <BarChart3 size={17} />, onClick: fixBalances },
                         { label: "দোকানের তথ্য ও লোগো", icon: <Settings size={17} />, onClick: () => setView("settings") },
-                        { label: "ডার্ক / লাইট মোড বদলান", icon: <Moon size={17} />, onClick: toggleTheme },
+                        { label: "স্টাফ হাজিরা ও বেতন", icon: <UserCheck size={17} />, onClick: () => setView("staff") },
                         {
                           label: backingUp ? "ব্যাকআপ তৈরি হচ্ছে…" : "ব্যাকআপ ডাউনলোড (CSV)",
                           icon: <Download size={17} />,
@@ -4638,6 +4922,18 @@ export default function LedgerApp() {
                     </div>
                   );
                 })()}
+
+                {/* স্টাফ হাজিরা ও বেতন */}
+                <button onClick={() => setView("staff")} className="w-full flex items-center justify-between px-5 py-3 mb-3 active:opacity-90" style={card}>
+                  <div className="flex items-center gap-3 text-left">
+                    <UserCheck size={24} color="var(--navy-fg)" strokeWidth={1.8} />
+                    <div>
+                      <div style={{ color: NAVY, fontSize: 15, fontWeight: 700 }}>স্টাফ হাজিরা ও বেতন</div>
+                      <div style={{ color: GRAY, fontSize: 12.5, marginTop: 2 }}>হাজিরা, অ্যাডভান্স ও বেতন — বেতন দিলে খরচে নিজে ওঠে</div>
+                    </div>
+                  </div>
+                  <div style={{ color: GRAY, fontSize: 20 }}>›</div>
+                </button>
 
                 {/* বাকির লিস্ট */}
                 <button onClick={() => setView("dues")} className="w-full flex items-center justify-between px-5 py-4 mb-3 active:opacity-90" style={card}>
@@ -5474,6 +5770,304 @@ export default function LedgerApp() {
             </div>
           </>
         )}
+
+        {/* ---------- STAFF (স্টাফ হাজিরা ও বেতন) ---------- */}
+        {view === "staff" &&
+          (() => {
+            const NAVY = "var(--navy-fg)";
+            const GRAY = "var(--gray)";
+            const { y, m } = staffYM;
+            const n = daysInMonth(y, m);
+            const isCurMonth = y === new Date().getFullYear() && m === new Date().getMonth() + 1;
+            const today = new Date().getDate();
+            const box = { background: "var(--card)", border: "1px solid var(--line)" };
+            const visible = staffList.filter((s) => showInactive || s.active !== false);
+            const rows = visible.map((st) => {
+              const calc = staffMonthCalc(st, (attendY[m] || {})[st.id], y, m);
+              const rec = (salaryY[m] || {})[st.id] || null;
+              const plan = planPayment(calc.gross, staffAdv, st.id);
+              return { st, calc, rec, plan, adv: advOutstanding(staffAdv, st.id) };
+            });
+            const totGross = rows.reduce((a, r) => a + r.calc.gross, 0);
+            const totPaid = rows.reduce((a, r) => a + (r.rec ? r.rec.net : 0), 0);
+            const totDue = rows.reduce((a, r) => a + (r.rec ? 0 : r.plan.net), 0);
+            const shiftMonth = (delta) => {
+              let ny = y;
+              let nm = m + delta;
+              if (nm < 1) {
+                nm = 12;
+                ny--;
+              } else if (nm > 12) {
+                nm = 1;
+                ny++;
+              }
+              setStaffYM({ y: ny, m: nm });
+              setStaffOpen(null);
+              setPayForm(null);
+              setAdvForm(null);
+            };
+            const stat = (label, value, color) => (
+              <div className="rounded-xl px-2 py-2 text-center" style={box}>
+                <div style={{ fontSize: 11, color: GRAY }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color }}>৳{toBn(fmt(value))}</div>
+              </div>
+            );
+            const attStyle = (v) =>
+              v === "P"
+                ? { background: "var(--green)", color: "#FFFFFF", border: "1px solid var(--green)" }
+                : v === "A"
+                ? { background: "var(--red)", color: "#FFFFFF", border: "1px solid var(--red)" }
+                : v === "H"
+                ? { background: "var(--orange-bg)", color: "#FFFFFF", border: "1px solid var(--orange-bg)" }
+                : { background: "var(--card)", color: GRAY, border: "1px solid var(--line)" };
+            const attMark = (v) => (v === "P" ? "✓" : v === "A" ? "✕" : v === "H" ? "½" : "");
+            const inp = { fontSize: 13.5, border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)" };
+            return (
+              <>
+                <HeaderBar title="স্টাফ হাজিরা ও বেতন" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
+                <div className="px-3 pt-4 pb-24">
+                  <div className="flex items-center justify-between mb-3">
+                    <button onClick={() => shiftMonth(-1)} className="px-3 py-1.5 rounded-xl active:opacity-70" style={{ ...box, color: NAVY, fontSize: 16 }} aria-label="আগের মাস">
+                      ‹
+                    </button>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: NAVY }}>
+                      {MONTH_NAMES[m - 1]} {toBn(y)}
+                    </div>
+                    <button onClick={() => shiftMonth(1)} className="px-3 py-1.5 rounded-xl active:opacity-70" style={{ ...box, color: NAVY, fontSize: 16 }} aria-label="পরের মাস">
+                      ›
+                    </button>
+                  </div>
+
+                  {staffForm && (
+                    <div className="rounded-xl mb-3 px-3 py-3" style={{ border: "2px solid var(--navy-line)", background: "var(--card)" }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 8 }}>{staffForm.id ? "স্টাফের তথ্য বদলান" : "নতুন স্টাফ রেজিস্টার"}</div>
+                      <input value={staffForm.name || ""} onChange={(e) => setStaffForm((p) => ({ ...p, name: e.target.value }))} placeholder="স্টাফের নাম *" className="w-full px-3 py-2 rounded-xl outline-none mb-2" style={inp} />
+                      <input value={staffForm.phone || ""} onChange={(e) => setStaffForm((p) => ({ ...p, phone: e.target.value }))} inputMode="tel" placeholder="ফোন নম্বর" className="w-full px-3 py-2 rounded-xl outline-none mb-2" style={inp} />
+                      <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                        <select value={staffForm.type || "monthly"} onChange={(e) => setStaffForm((p) => ({ ...p, type: e.target.value }))} className="px-3 py-2 rounded-xl outline-none" style={inp}>
+                          <option value="monthly">মাসিক বেতন</option>
+                          <option value="daily">দৈনিক বেতন</option>
+                        </select>
+                        <input value={staffForm.salary || ""} onChange={(e) => setStaffForm((p) => ({ ...p, salary: e.target.value }))} inputMode="decimal" placeholder={staffForm.type === "daily" ? "দৈনিক টাকা *" : "মাসিক টাকা *"} className="px-3 py-2 rounded-xl outline-none text-right" style={inp} />
+                      </div>
+                      <p style={{ fontSize: 11.5, color: GRAY, lineHeight: 1.6, marginBottom: 8 }}>
+                        {staffForm.type === "daily"
+                          ? "দৈনিক: বেতন = দৈনিক টাকা × উপস্থিত দিন (অর্ধদিবস = আধা)।"
+                          : "মাসিক: প্রতিদিনের হার = মাসিক বেতন ÷ ওই মাসের দিন সংখ্যা। বেতন = হার × উপস্থিত দিন (অর্ধদিবস = আধা)। পুরো মাস উপস্থিত থাকলে পুরো বেতন।"}
+                      </p>
+                      {staffForm.id && (
+                        <label className="flex items-center gap-2 mb-2" style={{ fontSize: 13, color: "var(--ink)" }}>
+                          <input type="checkbox" checked={staffForm.active !== false} onChange={(e) => setStaffForm((p) => ({ ...p, active: e.target.checked }))} /> স্টাফ এখন কাজ করছেন (ছেড়ে গেলে টিক তুলে দিন)
+                        </label>
+                      )}
+                      <div className="flex gap-2">
+                        <button onClick={() => setStaffForm(null)} className="px-4 py-2.5 rounded-xl active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 13.5, fontWeight: 600 }}>
+                          বাতিল
+                        </button>
+                        <button onClick={saveStaffForm} className="flex-1 py-2.5 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}>
+                          সেভ করুন
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {editMode ? (
+                    <button onClick={() => setStaffForm({ id: null, name: "", phone: "", type: "monthly", salary: "", active: true })} className="w-full flex items-center justify-center gap-1.5 py-2.5 mb-3 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}>
+                      <Plus size={16} /> নতুন স্টাফ রেজিস্টার
+                    </button>
+                  ) : (
+                    <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 8 }}>স্টাফ রেজিস্টার, হাজিরা, অ্যাডভান্স বা বেতন দিতে এডিট মোড চালু করুন।</p>
+                  )}
+
+                  {visible.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      {stat("হাজিরা অনুযায়ী মোট বেতন", totGross, NAVY)}
+                      {stat("দেওয়া হয়েছে", totPaid, "var(--green)")}
+                      {stat("দিতে বাকি (নেট)", totDue, "var(--red)")}
+                    </div>
+                  )}
+
+                  {staffLoading ? (
+                    <p style={{ fontSize: 12, color: GRAY }}>লোড হচ্ছে…</p>
+                  ) : visible.length === 0 ? (
+                    <p style={{ fontSize: 12, color: GRAY }}>এখনও কোনো স্টাফ রেজিস্টার করা নেই।</p>
+                  ) : (
+                    rows.map(({ st, calc, rec, plan, adv }) => {
+                      const open = staffOpen === st.id;
+                      const att = (attendY[m] || {})[st.id] || {};
+                      const myAdv = staffAdv.filter((a) => a.staffId === st.id).sort((a, b) => (a.date < b.date ? 1 : -1));
+                      const mismatch = rec && rec.gross !== calc.gross;
+                      return (
+                        <div key={st.id} className="rounded-xl px-3 py-3 mb-3" style={{ ...box, opacity: st.active === false ? 0.65 : 1 }}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)" }}>
+                                {st.name}
+                                {st.active === false && <span style={{ fontSize: 11, color: GRAY }}> (ছেড়ে গেছেন)</span>}
+                              </div>
+                              <div style={{ fontSize: 12, color: GRAY }}>
+                                {st.type === "daily" ? "দৈনিক" : "মাসিক"} ৳{toBn(fmt(num(st.salary)))}
+                                {st.type !== "daily" ? ` · হার ৳${toBn(fmt(Math.round(calc.rate)))}/দিন` : ""}
+                                {st.phone ? ` · ${st.phone}` : ""}
+                              </div>
+                            </div>
+                            {editMode && (
+                              <button onClick={() => setStaffForm({ ...st })} className="px-2.5 py-1 rounded-full active:opacity-70 shrink-0" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12, fontWeight: 700 }}>
+                                ✎ বদলান
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5 mt-2" style={{ fontSize: 12 }}>
+                            <span className="px-2 py-0.5 rounded-full" style={{ background: "var(--green-tint)", color: "var(--green-dark)" }}>উপস্থিত {toBn(calc.p)}</span>
+                            <span className="px-2 py-0.5 rounded-full" style={{ background: "var(--amber-tint)", color: "var(--amber-text)" }}>অর্ধ {toBn(calc.h)}</span>
+                            <span className="px-2 py-0.5 rounded-full" style={{ background: "var(--red-tint)", color: "var(--red-dark)" }}>অনুপস্থিত {toBn(calc.a)}</span>
+                            <span className="px-2 py-0.5 rounded-full" style={{ background: "var(--tint)", color: GRAY }}>চিহ্নহীন {toBn(calc.unmarked)}</span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 mt-2">
+                            {stat("হাজিরা অনুযায়ী বেতন", calc.gross, NAVY)}
+                            {stat("অ্যাডভান্স বাকি", adv, "var(--orange)")}
+                            {stat(rec ? "দেওয়া হয়েছে" : "দেওয়ার মতো (নেট)", rec ? rec.net : plan.net, rec ? "var(--green)" : "var(--ink)")}
+                          </div>
+                          {!rec && plan.deduct > 0 && (
+                            <div style={{ fontSize: 11.5, color: GRAY, marginTop: 4 }}>
+                              বেতন ৳{toBn(fmt(calc.gross))} − অ্যাডভান্স কাটা ৳{toBn(fmt(plan.deduct))} = ৳{toBn(fmt(plan.net))}
+                            </div>
+                          )}
+
+                          {rec ? (
+                            <div className="mt-2 rounded-xl px-3 py-2" style={{ background: "var(--green-tint)", color: "var(--green-dark)", fontSize: 12.5 }}>
+                              ✓ বেতন দেওয়া হয়েছে {parseYmd(rec.date) ? `${toBn(parseYmd(rec.date).dd)} ${MONTH_NAMES[parseYmd(rec.date).mm - 1]} ${toBn(parseYmd(rec.date).yy)}` : ""} — ৳{toBn(fmt(rec.net))}
+                              {rec.deduct > 0 ? ` (অ্যাডভান্স কাটা ৳${toBn(fmt(rec.deduct))})` : ""} · ওই দিনের খরচে ওঠানো আছে
+                              {mismatch && <div style={{ color: "var(--red)", marginTop: 3 }}>⚠ হাজিরা বদলেছে — এখনকার বেতন ৳{toBn(fmt(calc.gross))}, দেওয়া হয়েছিল ৳{toBn(fmt(rec.gross))}-এর হিসাবে।</div>}
+                              {editMode && (
+                                <button onClick={() => undoSalary(st)} className="block mt-1" style={{ color: "var(--red)", fontSize: 12 }}>
+                                  বেতন দেওয়া বাতিল করুন
+                                </button>
+                              )}
+                            </div>
+                          ) : null}
+
+                          {editMode && isCurMonth && (
+                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                              <span style={{ fontSize: 12, color: GRAY }}>আজ ({toBn(today)}):</span>
+                              {[["P", "উপস্থিত"], ["H", "অর্ধ"], ["A", "অনুপস্থিত"]].map(([v, label]) => (
+                                <button key={v} onClick={() => applyAttend(st.id, today, att[today] === v ? "" : v)} className="px-2.5 py-1 rounded-full active:opacity-70" style={{ ...attStyle(att[today] === v ? v : ""), fontSize: 12, fontWeight: 700 }}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            <button onClick={() => setStaffOpen(open ? null : st.id)} className="px-3 py-1.5 rounded-xl active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12.5, fontWeight: 700 }}>
+                              {open ? "হাজিরা লুকান ▲" : "হাজিরা দেখুন/বদলান ▼"}
+                            </button>
+                            {editMode && (
+                              <>
+                                <button onClick={() => { setAdvForm({ id: st.id, date: todayInputValue(), amount: "", note: "" }); setPayForm(null); }} className="px-3 py-1.5 rounded-xl active:opacity-70" style={{ background: "var(--amber-tint)", color: "var(--amber-text)", fontSize: 12.5, fontWeight: 700 }}>
+                                  + অ্যাডভান্স দিন
+                                </button>
+                                {!rec && (
+                                  <button onClick={() => { setPayForm({ id: st.id, date: todayInputValue(), amount: "" }); setAdvForm(null); }} className="px-3 py-1.5 rounded-xl active:opacity-70" style={{ background: "var(--navy-bg)", color: "#FFFFFF", fontSize: 12.5, fontWeight: 700 }}>
+                                    বেতন দিন
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          {open && (
+                            <div className="mt-3">
+                              <div className="flex flex-wrap gap-2 mb-2" style={{ fontSize: 11, color: GRAY }}>
+                                <span>ঘরে চাপলে বদলায়:</span>
+                                <span>✓ উপস্থিত</span>
+                                <span>✕ অনুপস্থিত</span>
+                                <span>½ অর্ধদিবস</span>
+                                <span>খালি = চিহ্নহীন</span>
+                              </div>
+                              <div className="grid gap-1.5" style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
+                                {Array.from({ length: n }, (_, i) => i + 1).map((d) => (
+                                  <button key={d} onClick={() => cycleAttend(st.id, d)} disabled={!editMode} aria-label={`${d} তারিখ`} className="rounded-lg py-1.5 active:opacity-70" style={{ ...attStyle(att[d]), fontSize: 12, fontWeight: 600, opacity: !editMode ? 0.9 : 1 }}>
+                                    <div style={{ fontSize: 10.5, opacity: 0.85 }}>{toBn(d)}</div>
+                                    <div style={{ fontSize: 14, lineHeight: 1.1, minHeight: 16 }}>{attMark(att[d])}</div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {advForm && advForm.id === st.id && (
+                            <div className="mt-3 rounded-xl px-3 py-3" style={{ background: "var(--amber-tint)" }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--amber-text)", marginBottom: 6 }}>অ্যাডভান্স দিন — {st.name}</div>
+                              <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                                <input value={advForm.amount} onChange={(e) => setAdvForm((p) => ({ ...p, amount: e.target.value }))} inputMode="decimal" placeholder="টাকা" className="px-3 py-2 rounded-xl outline-none text-right" style={inp} />
+                                <input type="date" value={advForm.date} onChange={(e) => setAdvForm((p) => ({ ...p, date: e.target.value }))} className="px-2 py-2 rounded-xl outline-none" style={inp} />
+                              </div>
+                              <input value={advForm.note} onChange={(e) => setAdvForm((p) => ({ ...p, note: e.target.value }))} placeholder="নোট (ঐচ্ছিক)" className="w-full px-3 py-2 rounded-xl outline-none mb-2" style={inp} />
+                              <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 8 }}>এই তারিখের খরচে "অ্যাডভান্স — {st.name}" নামে লেখা হবে। বেতন দেওয়ার সময় এটা বেতন থেকে কাটা যাবে।</p>
+                              <div className="flex gap-2">
+                                <button onClick={() => setAdvForm(null)} className="px-4 py-2 rounded-xl" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 13 }}>বাতিল</button>
+                                <button onClick={() => addAdvance(st)} className="flex-1 py-2 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "#FFFFFF", fontSize: 13.5, fontWeight: 700 }}>অ্যাডভান্স সেভ</button>
+                              </div>
+                            </div>
+                          )}
+
+                          {payForm && payForm.id === st.id && (
+                            <div className="mt-3 rounded-xl px-3 py-3" style={{ background: "var(--tint)" }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: NAVY, marginBottom: 6 }}>
+                                {st.name} এর {MONTH_NAMES[m - 1]} মাসের বেতন দিন
+                              </div>
+                              <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                                <input value={payForm.amount} onChange={(e) => setPayForm((p) => ({ ...p, amount: e.target.value }))} inputMode="decimal" placeholder={`টাকা (হিসাবে ${toBn(fmt(plan.net))})`} className="px-3 py-2 rounded-xl outline-none text-right" style={inp} />
+                                <input type="date" value={payForm.date} onChange={(e) => setPayForm((p) => ({ ...p, date: e.target.value }))} className="px-2 py-2 rounded-xl outline-none" style={inp} />
+                              </div>
+                              <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 8, lineHeight: 1.6 }}>
+                                হাজিরা অনুযায়ী ৳{toBn(fmt(calc.gross))}
+                                {plan.deduct > 0 ? ` − অ্যাডভান্স ৳${toBn(fmt(plan.deduct))}` : ""} = দেওয়ার মতো ৳{toBn(fmt(plan.net))}। টাকার ঘর ফাঁকা রাখলে এটাই ধরা হবে। সেভ করলে এই তারিখের খরচে "বেতন — {st.name}" নামে ওঠে যাবে।
+                              </p>
+                              <div className="flex gap-2">
+                                <button onClick={() => setPayForm(null)} className="px-4 py-2 rounded-xl" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 13 }}>বাতিল</button>
+                                <button onClick={() => paySalary(st)} className="flex-1 py-2 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "#FFFFFF", fontSize: 13.5, fontWeight: 700 }}>বেতন দেওয়া হয়েছে — খরচে লিখুন</button>
+                              </div>
+                            </div>
+                          )}
+
+                          {myAdv.length > 0 && (
+                            <div className="mt-3">
+                              <div style={{ fontSize: 12, color: GRAY, marginBottom: 2 }}>অ্যাডভান্সের তালিকা</div>
+                              {myAdv.slice(0, 8).map((a) => (
+                                <div key={a.id} className="flex items-center justify-between py-1" style={{ borderTop: "1px solid var(--line2)", fontSize: 12.5 }}>
+                                  <span style={{ color: "var(--ink)" }}>
+                                    {parseYmd(a.date) ? `${toBn(parseYmd(a.date).dd)} ${MONTH_NAMES[parseYmd(a.date).mm - 1].slice(0, 3)}` : a.date} · ৳{toBn(fmt(a.amount))}
+                                    {a.note ? ` · ${a.note}` : ""}
+                                  </span>
+                                  <span className="flex items-center gap-2">
+                                    <span style={{ color: advLeft(a) > 0 ? "var(--orange)" : "var(--green)", fontWeight: 600 }}>{advLeft(a) > 0 ? `বাকি ৳${toBn(fmt(advLeft(a)))}` : "কাটা হয়েছে ✓"}</span>
+                                    {editMode && (a.settled || 0) === 0 && (
+                                      <button onClick={() => deleteAdvance(a)} style={{ color: "var(--red)" }} aria-label="অ্যাডভান্স মুছুন">
+                                        <Trash2 size={13} />
+                                      </button>
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                  {staffList.some((s) => s.active === false) && (
+                    <button onClick={() => setShowInactive((v) => !v)} style={{ fontSize: 12, color: GRAY }}>
+                      {showInactive ? "ছেড়ে যাওয়া স্টাফ লুকান" : "ছেড়ে যাওয়া স্টাফ দেখান"}
+                    </button>
+                  )}
+                </div>
+              </>
+            );
+          })()}
 
         {/* ---------- SAFETY (ডেটা সুরক্ষা ও ব্যাকআপ) ---------- */}
         {view === "safety" &&
