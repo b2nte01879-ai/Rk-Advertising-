@@ -47,7 +47,8 @@ const newItemRow = () => ({
 
 const num = (v) => (v === "" || v === null || v === undefined ? NaN : parseFloat(v));
 // বিক্রির সারিতে 'বাকি' যেমন লেখা তেমনই থাকে; শোধ হলে 'duePaid' বাড়ে। বাকির লিস্টে দেখায় বাকি − শোধ।
-const dueRemaining = (it) => Math.max(0, (isNaN(num(it.due)) ? 0 : num(it.due)) - (isNaN(num(it.duePaid)) ? 0 : num(it.duePaid)));
+// ছাড় (dueWaived) নগদ ছাড়াই বাকি কমায়, তাই আয়ে ওঠে না
+const dueRemaining = (it) => Math.max(0, (isNaN(num(it.due)) ? 0 : num(it.due)) - (isNaN(num(it.duePaid)) ? 0 : num(it.duePaid)) - (isNaN(num(it.dueWaived)) ? 0 : num(it.dueWaived)));
 
 function grossTotal(item) {
   const h = isNaN(num(item.height)) ? 1 : num(item.height);
@@ -335,7 +336,7 @@ function mergeValues(key, baseStr, mineStr, remoteStr) {
     if (key.startsWith("yearstats:") || key === "shopinfo") return J(merge3Map(b, m, r));
     if (key.startsWith("attend:")) return J(merge3Deep(b, m, r, 2));
     if (key.startsWith("salary:")) return J(merge3Deep(b, m, r, 1));
-    if (key.startsWith("memos:") || key === "manualdues" || key === "trash" || key === "customers" || key === "staff" || key === "staffadv" || key.startsWith("presets:"))
+    if (key.startsWith("memos:") || key === "manualdues" || key === "trash" || key === "customers" || key === "staff" || key === "staffadv" || key === "payables" || key === "payablepay" || key.startsWith("presets:"))
       return J(merge3List(Array.isArray(b) ? b : null, Array.isArray(m) ? m : [], Array.isArray(r) ? r : []));
   } catch (e) {
     return null;
@@ -621,7 +622,7 @@ async function mapLimit(items, limit, fn) {
 }
 
 // ---------- ব্যাকআপ / স্ন্যাপশট / রিস্টোর ----------
-const FIXED_DATA_KEYS = ["manualdues", "presets:sale", "presets:expense", "shopinfo", "trash", "customers", "staff", "staffadv"];
+const FIXED_DATA_KEYS = ["manualdues", "presets:sale", "presets:expense", "shopinfo", "trash", "customers", "staff", "staffadv", "payables", "payablepay"];
 const isDataKey = (k) => FIXED_DATA_KEYS.includes(k) || /^(day|dues|yearstats|memos|attend|salary):/.test(k);
 const SNAP_INDEX = "snap:index";
 const SNAP_CHUNK = 250000;
@@ -978,45 +979,6 @@ async function ensureDriveBackup() {
   }
 }
 
-const markFileBackup = () => {
-  try {
-    localStorage.setItem("rk-last-file-backup", snapDateStr());
-  } catch (e) {
-    /* ignore */
-  }
-};
-const lastFileBackup = () => {
-  try {
-    return localStorage.getItem("rk-last-file-backup");
-  } catch (e) {
-    return null;
-  }
-};
-async function exportBackupFile(onProgress) {
-  const { obj, failed } = await buildBackupObject(onProgress);
-  const json = J(obj);
-  const name = `rk-hisab-backup-${obj.date}.json`;
-  const file = new File([json], name, { type: "application/json" });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: name });
-      markFileBackup();
-      return { status: "shared", failed };
-    } catch (e) {
-      if (e && e.name === "AbortError") return { status: "cancelled" };
-    }
-  }
-  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-  markFileBackup();
-  return { status: "downloaded", failed };
-}
 async function restoreFromBackupObject(obj, onProgress, opts = {}) {
   if (!obj || obj.app !== "rk-ledger" || !obj.keys || typeof obj.keys !== "object") throw new Error("bad-format");
   const entries = Object.entries(obj.keys).filter(([k, v]) => isDataKey(k) && typeof v === "string");
@@ -1199,6 +1161,8 @@ async function rebalance({ fromY, fromM, fromD, dryRun } = {}) {
 }
 
 // ---------- স্টাফ হাজিরা, অ্যাডভান্স ও বেতন ----------
+const PAYABLES_KEY = "payables";
+const PAYABLEPAY_KEY = "payablepay";
 const STAFF_KEY = "staff";
 const STAFF_ADV_KEY = "staffadv";
 async function loadJsonList(key) {
@@ -1234,8 +1198,9 @@ function staffMonthCalc(st, monthAtt, y, m) {
   }
   const units = p + h * 0.5;
   const sal = num(st.salary) || 0;
-  const rate = st.type === "daily" ? sal : sal / n;
-  return { n, p, h, a, unmarked: n - p - h - a, units, rate, gross: Math.round(rate * units) };
+  const rate = st.type === "daily" ? sal : sal / 30; // মাসিক: প্রতি মাস ৩০ দিন ধরা হয়
+  const raw = Math.round(rate * units);
+  return { n, p, h, a, unmarked: n - p - h - a, units, rate, gross: st.type === "daily" ? raw : Math.min(Math.round(sal), raw) };
 }
 const advLeft = (a) => Math.max(0, (a.amount || 0) - (a.settled || 0));
 const advOutstanding = (advs, staffId) => advs.filter((a) => a.staffId === staffId).reduce((s, a) => s + advLeft(a), 0);
@@ -1393,8 +1358,10 @@ async function buildAllTransactions() {
         due: dueRemaining(it),
         discount: num(it.discount) || 0,
         customer: (it.customer || "").trim(),
-        billed: grossTotal(it) - (num(it.discount) || 0),
-        paid: Math.max(0, grossTotal(it) - (num(it.discount) || 0) - dueRemaining(it)),
+        id: it.id,
+        detail: lineText(it),
+        billed: grossTotal(it) - (num(it.discount) || 0) - (num(it.dueWaived) || 0),
+        paid: Math.max(0, grossTotal(it) - (num(it.discount) || 0) - (num(it.dueWaived) || 0) - dueRemaining(it)),
       });
     });
   });
@@ -1637,6 +1604,26 @@ function openCall(phone) {
 }
 
 // মেমো + বাকির তালিকা থেকে কাস্টমারভিত্তিক হিসাব
+// একটা পণ্য-সারির পুরো বিবরণ: নাম · সাইজ · পরিমান · দাম = মোট
+const lineText = (it) => {
+  const nm = (it.name && String(it.name).trim()) || "পণ্য";
+  const h = String(it.height === undefined || it.height === null ? "" : it.height).trim();
+  const w = String(it.weight === undefined || it.weight === null ? "" : it.weight).trim();
+  const q = String(it.qty === undefined || it.qty === null ? "" : it.qty).trim();
+  const p = String(it.price === undefined || it.price === null ? "" : it.price).trim();
+  const parts = [nm];
+  if (h && w) parts.push(`সাইজ ${toBn(h)}×${toBn(w)}`);
+  else if (h || w) parts.push(`সাইজ ${toBn(h || w)}`);
+  parts.push(`পরিমান ${toBn(q || "1")}`);
+  if (p) parts.push(`দাম ৳${toBn(p)}`);
+  let t = parts.join(" · ");
+  const g = grossTotal(it);
+  if (!isNaN(g)) t += ` = ৳${toBn(fmt(g))}`;
+  const d = numOr0(it.discount);
+  if (d > 0) t += ` · ছাড় ৳${toBn(fmt(d))}`;
+  return t;
+};
+
 const CUSTOMERS_KEY = "customers";
 async function loadCustomerReg() {
   const raw = await kget(CUSTOMERS_KEY);
@@ -1727,7 +1714,7 @@ function customerRows(c) {
   return [
     ...c.memos.map((mm) => {
       const cc = memoCalc(mm);
-      return { kind: "memo", mm, val: val(mm), y: mm.y, m: mm.m, d: mm.d, label: `মেমো নং ${toBn(mm.no)}`, total: cc.total, paid: cc.paid, due: cc.due };
+      return { kind: "memo", mm, val: val(mm), y: mm.y, m: mm.m, d: mm.d, label: `মেমো নং ${toBn(mm.no)}`, detail: mm.items.filter(memoItemUsed).map(lineText), total: cc.total, paid: cc.paid, due: cc.due };
     }),
     ...c.sales.map((sl) => ({
       kind: "sale",
@@ -1735,7 +1722,8 @@ function customerRows(c) {
       y: sl.y,
       m: sl.m,
       d: sl.d,
-      label: `বিক্রি: ${sl.name}`,
+      label: "বিক্রি",
+      detail: [sl.detail || sl.name],
       total: sl.billed || 0,
       paid: sl.paid || 0,
       due: sl.due || 0,
@@ -1749,6 +1737,7 @@ function customerRows(c) {
         m: e.m,
         d: e.d,
         label: e.manual ? "সরাসরি বাকি" : "দৈনিক হিসাবের বাকি",
+        detail: e.lines ? e.lines.map(lineText) : [],
         total: e.amount || 0,
         paid: 0,
         due: e.amount || 0,
@@ -2852,8 +2841,17 @@ export default function LedgerApp() {
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerData, setLedgerData] = useState([]);
   const [ledgerQuery, setLedgerQuery] = useState("");
-  const [paymentInputs, setPaymentInputs] = useState({});
-  const [payingKey, setPayingKey] = useState(null);
+  const [dueOpen, setDueOpen] = useState(null);
+  const [settleForm, setSettleForm] = useState(null);
+  const [showDueAdd, setShowDueAdd] = useState(false);
+  const [settlingBusy, setSettlingBusy] = useState(false);
+  const [pbList, setPbList] = useState([]);
+  const [pbPays, setPbPays] = useState([]);
+  const [pbOpen, setPbOpen] = useState(null);
+  const [pbShowAdd, setPbShowAdd] = useState(false);
+  const [pbShowPaid, setPbShowPaid] = useState(false);
+  const [pbAdd, setPbAdd] = useState({ name: "", amount: "", date: "", note: "" });
+  const [pbPay, setPbPay] = useState(null);
   const settlingRef = useRef(false); // ডাবল/ট্রিপল ট্যাপ ঠেকানোর লক
   const addingDueRef = useRef(false);
   const [backingUp, setBackingUp] = useState(false);
@@ -2865,9 +2863,8 @@ export default function LedgerApp() {
   const [memoDraft, setMemoDraft] = useState(null); // null হলে লিস্ট/ডিটেইল দেখায়
   const [memoView, setMemoView] = useState(null); // যে মেমো খুলে দেখা হচ্ছে
   const [memoSaving, setMemoSaving] = useState(false);
-  const [newDue, setNewDue] = useState({ name: "", amount: "", date: "", phone: "" });
+  const [newDue, setNewDue] = useState({ name: "", amount: "", date: "", phone: "", lines: [] });
   const [dueFilter, setDueFilter] = useState("all"); // all | old7 | old15
-  const [openDue, setOpenDue] = useState(null);
   const [custQuery, setCustQuery] = useState("");
   const [custSel, setCustSel] = useState(null);
   const openMemoRef = useRef(null);
@@ -3046,35 +3043,6 @@ export default function LedgerApp() {
     }
   }
 
-  async function settlePayment(dueEntry, py, pm, pd, amount) {
-    // ১. আসল বিক্রির 'বাকি' থেকে বাদ দেওয়া
-    const origRaw = await loadDay(dueEntry.y, dueEntry.m, dueEntry.d);
-    // 'বাকি' সংখ্যাটা বদলাই না, তাই আসল দিনের আয় একই থাকে। শুধু 'শোধ হয়েছে' জমা রাখি।
-    const items = origRaw.items.map((it) => {
-      if (it.id === dueEntry.id) {
-        const paidSoFar = Math.min(num(it.due) || 0, (num(it.duePaid) || 0) + amount);
-        return { ...it, duePaid: String(paidSoFar) };
-      }
-      return it;
-    });
-    await recomputeAndSaveDay(dueEntry.y, dueEntry.m, dueEntry.d, { ...origRaw, items });
-
-    // ২. পরিশোধের টাকা যেই তারিখে জমা হলো, সেই তারিখে আয় হিসেবে যোগ করা
-    const payRaw = await loadDay(py, pm, pd);
-    const newItem = {
-      id: emptyRowId(),
-      name: `${dueEntry.name} (পরিশোধ)`,
-      height: "",
-      weight: "",
-      qty: "1",
-      price: String(amount),
-      due: "",
-      discount: "",
-    };
-    const items2 = [...payRaw.items.filter(isMeaningfulItem), newItem];
-    await recomputeAndSaveDay(py, pm, pd, { ...payRaw, items: items2 });
-  }
-
   const phoneOf = (name, entry) => {
     if (entry && entry.phone) return entry.phone;
     const k = custKey(name);
@@ -3141,7 +3109,7 @@ export default function LedgerApp() {
       if (r) conflicts.push({ id: r.id, at: r.at, key: r.key, auto: r.auto });
     }
     conflicts.sort((a, b) => b.at - a.at);
-    setSafety({ idx, local, conflicts, fileDate: lastFileBackup(), pending: pendingCount() });
+    setSafety({ idx, local, conflicts, pending: pendingCount() });
   };
   const driveErrText = (e) => {
     const m = String((e && e.message) || e);
@@ -3190,26 +3158,6 @@ export default function LedgerApp() {
       setDriveFiles(j.files || []);
     } catch (e) {
       setDriveFiles(null);
-    }
-  };
-  const driveBackupNow = async () => {
-    if (safetyBusy) return;
-    setSafetyBusy("ডেটা পড়া হচ্ছে…");
-    try {
-      const b = await buildBackupObject((d, t) => setSafetyBusy(`ডেটা পড়া হচ্ছে… ${toBn(d)}/${toBn(t)}`));
-      if (b.total && b.failed > b.total * 0.2) {
-        window.alert("অনেক ডেটা পড়া যায়নি (নেট সমস্যা) — নেট ঠিক হলে আবার চেষ্টা করুন।");
-        return;
-      }
-      setSafetyBusy("Drive-এ পাঠানো হচ্ছে…");
-      await uploadBackupToDrive(b.obj);
-      showToast("☁ Drive-এ ব্যাকআপ গেছে");
-      loadDriveFiles();
-    } catch (e) {
-      window.alert(driveErrText(e));
-    } finally {
-      setSafetyBusy("");
-      refreshSafety();
     }
   };
   const restoreFromDrive = async (f) => {
@@ -3456,36 +3404,6 @@ export default function LedgerApp() {
     window.alert("রিস্টোরের মতো কাজের জন্য আগে এডিট মোড চালু করুন (পিন লাগবে)।");
     return true;
   };
-  const doExportFile = async () => {
-    if (safetyBusy) return;
-    setSafetyBusy("ফাইল তৈরি হচ্ছে…");
-    try {
-      const r = await exportBackupFile((d, t) => setSafetyBusy(`ডেটা পড়া হচ্ছে… ${toBn(d)}/${toBn(t)}`));
-      if (r.status === "shared") showToast("✓ ব্যাকআপ ফাইল পাঠানো হয়েছে");
-      else if (r.status === "downloaded") showToast("✓ ব্যাকআপ ফাইল নামানো হয়েছে — Drive/WhatsApp-এ নিজের কাছে রেখে দিন");
-      if (r.failed > 0) window.alert(`⚠️ ${toBn(r.failed)} টা ডেটা পড়া যায়নি (নেট সমস্যা)। নেট ঠিক হলে আবার ব্যাকআপ নিন।`);
-    } catch (e) {
-      window.alert("ব্যাকআপ ফাইল বানানো যায়নি — আবার চেষ্টা করুন।");
-    } finally {
-      setSafetyBusy("");
-      refreshSafety();
-    }
-  };
-  const doSnapshotNow = async () => {
-    if (safetyBusy) return;
-    setSafetyBusy("স্ন্যাপশট নেওয়া হচ্ছে…");
-    try {
-      const r = await createServerSnapshot({ force: true }, (d, t) => setSafetyBusy(`ডেটা পড়া হচ্ছে… ${toBn(d)}/${toBn(t)}`));
-      if (r.status === "created") showToast("✓ স্ন্যাপশট সার্ভারে ও এই ডিভাইসে রাখা হয়েছে");
-      else if (r.status === "offline") window.alert("ইন্টারনেট নেই — নেট এলে আবার চেষ্টা করুন।");
-      else window.alert("স্ন্যাপশট পুরোপুরি হয়নি (" + r.status + ") — আবার চেষ্টা করুন।");
-    } catch (e) {
-      window.alert("স্ন্যাপশট নেওয়া যায়নি — আবার চেষ্টা করুন।");
-    } finally {
-      setSafetyBusy("");
-      refreshSafety();
-    }
-  };
   const runRestore = async (obj, label) => {
     if (needEdit()) return;
     const n = Object.keys((obj && obj.keys) || {}).length;
@@ -3593,74 +3511,195 @@ export default function LedgerApp() {
     return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   };
 
-  const handleSettlePayment = async (dueEntry, key) => {
-    const input = paymentInputs[key] || {};
-    const amount = num(input.amount);
-    if (isNaN(amount) || amount <= 0) return;
-    if (settlingRef.current) return; // আগের ক্লিকের কাজ চলছে — আবার চলবে না
-    settlingRef.current = true;
-    const dateStr = input.date || todayInputValue();
-    const [py, pm, pd] = dateStr.split("-").map(Number);
-    setPayingKey(key);
-    try {
-      if (dueEntry.manual) await settleManualDue(dueEntry, py, pm, pd, amount);
-      else await settlePayment(dueEntry, py, pm, pd, amount);
-      setPaymentInputs((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
+  // ---- বাকি: বিস্তারিত পণ্যসহ যোগ, কাস্টমার অনুযায়ী জমা + ছাড় ----
+  const addDueLine = () => setNewDue((p) => ({ ...p, lines: [...(p.lines || []), { name: "", height: "", weight: "", qty: "", price: "" }] }));
+  const updateDueLine = (i, f, v) => setNewDue((p) => ({ ...p, lines: (p.lines || []).map((ln, idx) => (idx === i ? { ...ln, [f]: v } : ln)) }));
+  const removeDueLine = (i) => setNewDue((p) => ({ ...p, lines: (p.lines || []).filter((_, idx) => idx !== i) }));
+
+  // এক বাকি-এন্ট্রিতে জমা (cash) আর ছাড় (waive) বসানো। আয়ের সারি এখানে হয় না — কাস্টমার-পর্যায়ে একবারই হয়।
+  async function applyDueSettlement(entry, cash, waive) {
+    if (entry.manual) {
+      const list = await loadManualDues();
+      const remaining = Math.max(0, (entry.amount || 0) - cash - waive);
+      await saveManualDues(list.map((x) => (x.id === entry.id ? { ...x, amount: remaining } : x)).filter((x) => !(x.id === entry.id && x.amount <= 0)));
+      if (entry.memoId) {
+        const ml = await loadMemosYear(entry.memoY);
+        await saveMemosYear(
+          entry.memoY,
+          ml.map((x) =>
+            x.id === entry.memoId
+              ? { ...x, paid: String(numOr0(x.paid) + cash), discount: String(numOr0(x.discount) + waive), dueListId: remaining > 0 ? x.dueListId : null }
+              : x
+          )
+        );
+      }
+    } else {
+      const origRaw = await loadDay(entry.y, entry.m, entry.d);
+      const items = origRaw.items.map((it) => {
+        if (it.id !== entry.id) return it;
+        const left = dueRemaining(it);
+        const c = Math.min(cash, left);
+        const w = Math.min(waive, Math.max(0, left - c));
+        return { ...it, duePaid: String((num(it.duePaid) || 0) + c), dueWaived: String((num(it.dueWaived) || 0) + w) };
       });
+      await recomputeAndSaveDay(entry.y, entry.m, entry.d, { ...origRaw, items });
+    }
+  }
+
+  const settleCustomerDues = async (group) => {
+    const f = settleForm && settleForm.key === group.key ? settleForm : null;
+    if (!f) return;
+    const paid = num(f.paid) || 0;
+    const waive = num(f.waive) || 0;
+    if (paid < 0 || waive < 0 || (paid === 0 && waive === 0)) {
+      window.alert("জমা বা ছাড় — অন্তত একটা টাকা লিখুন।");
+      return;
+    }
+    if (paid + waive > group.total + 0.001) {
+      window.alert(`জমা + ছাড় (৳${toBn(fmt(paid + waive))}) বাকির (৳${toBn(fmt(group.total))}) চেয়ে বেশি।`);
+      return;
+    }
+    const dt = parseYmd(f.date || todayInputValue());
+    if (!dt) {
+      window.alert("তারিখ ঠিক নয়।");
+      return;
+    }
+    if (settlingRef.current) return;
+    settlingRef.current = true;
+    setSettlingBusy(true);
+    try {
+      let cashLeft = paid;
+      let waiveLeft = waive;
+      for (const e of group.entries) {
+        if (cashLeft <= 0 && waiveLeft <= 0) break;
+        const c = Math.min(cashLeft, e.amount);
+        cashLeft -= c;
+        const w = Math.min(waiveLeft, e.amount - c);
+        waiveLeft -= w;
+        if (c > 0 || w > 0) await applyDueSettlement(e, c, w);
+      }
+      if (paid > 0) {
+        const payRaw = await loadDay(dt.yy, dt.mm, dt.dd);
+        const newItem = { id: emptyRowId(), name: `${group.name} (পরিশোধ)`, height: "", weight: "", qty: "1", price: String(paid), due: "", discount: "" };
+        await recomputeAndSaveDay(dt.yy, dt.mm, dt.dd, { ...payRaw, items: [...payRaw.items.filter(isMeaningfulItem), newItem] });
+      }
+      setSettleForm(null);
       setAllDuesLoading(true);
       setAllDues(await loadAllDuesFlat());
       setAllDuesLoading(false);
-      showToast(`✓ ৳${toBn(fmt(amount))} জমা হয়েছে`);
+      showToast(waive > 0 ? `✓ জমা ৳${toBn(fmt(paid))}, ছাড় ৳${toBn(fmt(waive))}` : `✓ ৳${toBn(fmt(paid))} জমা হয়েছে`);
+    } catch (e) {
+      window.alert("পুরোটা সেভ হয়নি — নেট দেখে বাকির লিস্ট আবার খুলে দেখুন, তারপর বাকিটা আবার দিন।");
     } finally {
       settlingRef.current = false;
-      setPayingKey(null);
+      setSettlingBusy(false);
     }
   };
 
-  // সরাসরি যোগ করা বাকির পরিশোধ: বাকি কমে, আর টাকাটা পরিশোধের তারিখে আয় হিসেবে বসে
-  async function settleManualDue(dueEntry, py, pm, pd, amount) {
-    const remaining = Math.max(0, (dueEntry.amount || 0) - amount);
-    const list = await loadManualDues();
-    const next = list
-      .map((x) => (x.id === dueEntry.id ? { ...x, amount: remaining } : x))
-      .filter((x) => !(x.id === dueEntry.id && x.amount <= 0));
-    await saveManualDues(next);
-
-    // মেমো থেকে আসা বাকি হলে মেমোর জমাও বাড়ে
-    if (dueEntry.memoId) {
-      const ml = await loadMemosYear(dueEntry.memoY);
-      await saveMemosYear(
-        dueEntry.memoY,
-        ml.map((x) =>
-          x.id === dueEntry.memoId
-            ? { ...x, paid: String(numOr0(x.paid) + amount), dueListId: remaining > 0 ? x.dueListId : null }
-            : x
-        )
-      );
+  // ---- পাওনাদার (আমি কাকে কত দেব) ----
+  const loadPayablesAll = async () => {
+    const [a, b] = await Promise.all([loadJsonList(PAYABLES_KEY), loadJsonList(PAYABLEPAY_KEY)]);
+    setPbList(a);
+    setPbPays(b);
+  };
+  const addPayable = async () => {
+    const name = (pbAdd.name || "").trim();
+    const amount = num(pbAdd.amount);
+    const dt = parseYmd(pbAdd.date || todayInputValue());
+    if (!name || !(amount > 0) || !dt) {
+      window.alert("নাম, টাকা আর তারিখ দিন।");
+      return;
     }
-
-    const payRaw = await loadDay(py, pm, pd);
-    const newItem = {
-      id: emptyRowId(),
-      name: `${dueEntry.name} (পরিশোধ)`,
-      height: "",
-      weight: "",
-      qty: "1",
-      price: String(amount),
-      due: "",
-      discount: "",
-    };
-    await recomputeAndSaveDay(py, pm, pd, { ...payRaw, items: [...payRaw.items.filter(isMeaningfulItem), newItem] });
-  }
+    const list = [...pbList, { id: emptyRowId(), name, date: pbAdd.date || todayInputValue(), amount, note: (pbAdd.note || "").trim(), paid: 0 }];
+    const ok = await kset(PAYABLES_KEY, JSON.stringify(list));
+    setPbList(list);
+    setPbAdd({ name: "", amount: "", date: "", note: "" });
+    setPbShowAdd(false);
+    showToast(ok ? "✓ পাওনা যোগ হয়েছে" : "ফোনে সেভ হয়েছে — নেট এলে সার্ভারে যাবে");
+  };
+  const deletePayable = async (en) => {
+    if ((en.paid || 0) > 0) {
+      window.alert("এর কিছু টাকা দেওয়া হয়ে গেছে, তাই মোছা যাবে না। আগে ওই পরিশোধ মুছুন।");
+      return;
+    }
+    if (!window.confirm(`${en.name} এর ৳${fmt(en.amount)} পাওনা মুছবেন?`)) return;
+    const list = pbList.filter((x) => x.id !== en.id);
+    await kset(PAYABLES_KEY, JSON.stringify(list));
+    setPbList(list);
+  };
+  const payPayable = async (g) => {
+    const f = pbPay && pbPay.key === g.key ? pbPay : null;
+    if (!f) return;
+    const amount = num(f.amount);
+    const dt = parseYmd(f.date || todayInputValue());
+    if (!(amount > 0) || !dt) {
+      window.alert("কত টাকা দিলেন আর তারিখ দিন।");
+      return;
+    }
+    if (amount > g.total + 0.001) {
+      window.alert(`দেওয়ার টাকা (৳${toBn(fmt(amount))}) পাওনার (৳${toBn(fmt(g.total))}) চেয়ে বেশি।`);
+      return;
+    }
+    if (settlingRef.current) return;
+    settlingRef.current = true;
+    setSettlingBusy(true);
+    try {
+      const id = emptyRowId();
+      let left = amount;
+      const parts = [];
+      for (const en of g.entries) {
+        if (left <= 0) break;
+        const take = Math.min(left, Math.max(0, en.amount - (en.paid || 0)));
+        if (take > 0) {
+          parts.push({ id: en.id, amt: take });
+          left -= take;
+        }
+      }
+      const expId = f.toExpense !== false ? `pbpay-${id}` : null;
+      if (expId) await upsertDayExpense(dt.yy, dt.mm, dt.dd, { id: expId, name: `পাওনা পরিশোধ — ${g.name}`, amount: String(amount) });
+      const list = pbList.map((en) => {
+        const part = parts.find((p) => p.id === en.id);
+        return part ? { ...en, paid: (en.paid || 0) + part.amt } : en;
+      });
+      const pays = [...pbPays, { id, key: g.key, name: g.name, date: f.date || todayInputValue(), amount, note: (f.note || "").trim(), expId, parts }];
+      await kset(PAYABLES_KEY, JSON.stringify(list));
+      await kset(PAYABLEPAY_KEY, JSON.stringify(pays));
+      setPbList(list);
+      setPbPays(pays);
+      setPbPay(null);
+      showToast(`✓ ${g.name} কে ৳${toBn(fmt(amount))} দেওয়া হয়েছে${expId ? " — খরচে ওঠানো হয়েছে" : ""}`);
+    } catch (e) {
+      window.alert("সেভ হয়নি — নেট দেখে আবার চেষ্টা করুন।");
+    } finally {
+      settlingRef.current = false;
+      setSettlingBusy(false);
+    }
+  };
+  const deletePayablePay = async (p) => {
+    if (!window.confirm(`${p.name} কে ৳${fmt(p.amount)} দেওয়ার এই এন্ট্রি মুছবেন? খরচের সারিটাও মুছবে আর পাওনা আবার বাকি হবে।`)) return;
+    try {
+      const dt = parseYmd(p.date);
+      if (dt && p.expId) await removeDayExpense(dt.yy, dt.mm, dt.dd, p.expId);
+      const list = pbList.map((en) => {
+        const part = (p.parts || []).find((x) => x.id === en.id);
+        return part ? { ...en, paid: Math.max(0, (en.paid || 0) - part.amt) } : en;
+      });
+      const pays = pbPays.filter((x) => x.id !== p.id);
+      await kset(PAYABLES_KEY, JSON.stringify(list));
+      await kset(PAYABLEPAY_KEY, JSON.stringify(pays));
+      setPbList(list);
+      setPbPays(pays);
+    } catch (e) {
+      window.alert("মোছা যায়নি — আবার চেষ্টা করুন।");
+    }
+  };
 
   const handleAddManualDue = async () => {
     const name = newDue.name.trim();
-    const amount = num(newDue.amount);
+    const usedLines = (newDue.lines || []).filter(memoItemUsed);
+    const amount = usedLines.length ? usedLines.reduce((sum, it) => sum + (grossTotal(it) || 0), 0) : num(newDue.amount);
     if (!name || isNaN(amount) || amount <= 0) {
-      window.alert("নাম আর বাকির টাকা দিন।");
+      window.alert("নাম আর বাকির টাকা (বা পণ্যের দাম) দিন।");
       return;
     }
     if (addingDueRef.current) return;
@@ -3669,10 +3708,20 @@ export default function LedgerApp() {
     setAddingDue(true);
     try {
       const list = await loadManualDues();
-      list.push({ id: emptyRowId(), y: yy, m: mm, d: dd, name, amount, ...((newDue.phone || "").trim() ? { phone: newDue.phone.trim() } : {}) });
+      list.push({
+        id: emptyRowId(),
+        y: yy,
+        m: mm,
+        d: dd,
+        name,
+        amount,
+        ...((newDue.phone || "").trim() ? { phone: newDue.phone.trim() } : {}),
+        ...(usedLines.length ? { lines: usedLines.map((it) => ({ name: it.name, height: it.height, weight: it.weight, qty: it.qty, price: it.price })), total: amount } : {}),
+      });
       const ok = await saveManualDues(list);
       if (!ok) window.alert("সার্ভারে সেভ হয়নি, তবে বাকি ফোনে জমা আছে — নেট এলে স্বয়ংক্রিয়ভাবে পাঠানো হবে। হারাবে না।");
-      setNewDue({ name: "", amount: "", date: "", phone: "" });
+      setNewDue({ name: "", amount: "", date: "", phone: "", lines: [] });
+      setShowDueAdd(false);
       setAllDues(await loadAllDuesFlat());
       if (ok) showToast("✓ বাকি যোগ হয়েছে");
     } finally {
@@ -4152,7 +4201,7 @@ export default function LedgerApp() {
 
   // গ্রাহক লেজার / এন্ট্রি খোঁজার ডেটা লোড
   useEffect(() => {
-    if (view !== "ledger" && view !== "customers") return;
+    if (view !== "ledger" && view !== "customers" && view !== "dues") return;
     let cancelled = false;
     setLedgerLoading(true);
     (async () => {
@@ -4249,6 +4298,7 @@ export default function LedgerApp() {
   }, []);
   useEffect(() => {
     if (view === "staff") loadStaffAll(staffYM.y);
+    if (view === "payables") loadPayablesAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, staffYM.y]);
   useEffect(() => {
@@ -4782,21 +4832,12 @@ export default function LedgerApp() {
                       items={[
                         { label: "কাস্টমার মেমো", icon: <FileText size={17} />, onClick: () => setView("memos") },
                         { label: "কাস্টমারের পুরো হিসাব", icon: <Users size={17} />, onClick: () => { setCustSel(null); setView("customers"); } },
-                        { label: "গ্রাহক লেজার / এন্ট্রি খুঁজুন", icon: <Search size={17} />, onClick: () => setView("ledger") },
                         { label: "রিসাইকেল বিন (মোছা ফেরত)", icon: <RotateCcw size={17} />, onClick: () => setView("trash") },
                         { label: "ডেটা সুরক্ষা ও ব্যাকআপ", icon: <Shield size={17} />, onClick: () => setView("safety") },
                         { label: "হিসাব মিলিয়ে নিন (অবশিষ্ট ঠিক করুন)", icon: <BarChart3 size={17} />, onClick: fixBalances },
                         { label: "দোকানের তথ্য ও লোগো", icon: <Settings size={17} />, onClick: () => setView("settings") },
                         { label: "স্টাফ হাজিরা ও বেতন", icon: <UserCheck size={17} />, onClick: () => setView("staff") },
-                        {
-                          label: backingUp ? "ব্যাকআপ তৈরি হচ্ছে…" : "ব্যাকআপ ডাউনলোড (CSV)",
-                          icon: <Download size={17} />,
-                          disabled: backingUp,
-                          onClick: () => {
-                            setBackingUp(true);
-                            downloadBackupCsv(() => setBackingUp(false));
-                          },
-                        },
+                        { label: "আমি কাকে কত দেব (পাওনাদার)", icon: <Wallet size={17} />, onClick: () => setView("payables") },
                       ]}
                     />
                   </div>
@@ -4823,7 +4864,7 @@ export default function LedgerApp() {
                 </div>
 
                 {/* বছর বেছে নিন — ২টা ঘর: চলতি বছর | পরের বছরগুলো */}
-                <div className="px-5 py-4" style={card}>
+                <div className="px-5 py-4 mb-3" style={card}>
                   <p style={{ color: GRAY, fontSize: 14, marginBottom: 8 }}>বছর বেছে নিন</p>
                   <div className="grid grid-cols-2 gap-3">
                     <button
@@ -4860,22 +4901,43 @@ export default function LedgerApp() {
                   </div>
                 </div>
 
-                {/* শেষ হিসাব ওঠানো */}
-                <div className="px-5 py-3 mb-3 flex items-center justify-between" style={card}>
-                  <div style={{ color: GRAY, fontSize: 14 }}>🗓 শেষ হিসাব ওঠানো</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: lastEntry ? lastUpdateColor(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : GRAY }}>
-                    {lastEntry ? lastUpdateText(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : "—"}
+                {/* বাকির লিস্ট */}
+                <button onClick={() => setView("dues")} className="w-full flex items-center justify-between px-5 py-4 mb-3 active:opacity-90" style={card}>
+                  <div className="text-left">
+                    <div style={{ color: NAVY, fontSize: 18, fontWeight: 700 }}>বাকির লিস্ট</div>
+                    <div style={{ color: GRAY, fontSize: 13, marginTop: 2 }}>
+                      {allDuesLoading
+                        ? "লোড হচ্ছে…"
+                        : (() => {
+                            const old15n = allDues.filter((e) => daysSince(e.y, e.m, e.d) >= 15).length;
+                            return `${toBn(allDues.length)} টা এন্ট্রি${old15n ? ` · ⚠ ${toBn(old15n)} টা ১৫+ দিনের পুরনো` : " · দেখতে ট্যাপ করুন"}`;
+                          })()}
+                    </div>
                   </div>
-                </div>
+                  <div style={{ color: "var(--red)", fontSize: 21, fontWeight: 700 }}>
+                    {allDuesLoading ? "…" : money(allDues.reduce((a, e) => a + (e.amount || 0), 0))}
+                  </div>
+                </button>
+
+                {/* স্টাফ হাজিরা ও বেতন */}
+                <button onClick={() => setView("staff")} className="w-full flex items-center justify-between px-5 py-3 mb-3 active:opacity-90" style={card}>
+                  <div className="flex items-center gap-3 text-left">
+                    <UserCheck size={24} color="var(--navy-fg)" strokeWidth={1.8} />
+                    <div>
+                      <div style={{ color: NAVY, fontSize: 15, fontWeight: 700 }}>স্টাফ হাজিরা ও বেতন</div>
+                      <div style={{ color: GRAY, fontSize: 12.5, marginTop: 2 }}>হাজিরা, অ্যাডভান্স ও বেতন — বেতন দিলে খরচে নিজে ওঠে</div>
+                    </div>
+                  </div>
+                  <div style={{ color: GRAY, fontSize: 20 }}>›</div>
+                </button>
 
                 {/* ডেটা সুরক্ষা অবস্থা */}
                 {(() => {
                   const dayDiff = (ds) => (ds ? Math.floor((Date.now() - new Date(ds + "T00:00:00").getTime()) / 86400000) : null);
-                  const fbDays = dayDiff(lastFileBackup());
                   const driveOn = !!driveCfg;
                   const drDays = dayDiff(lastDriveBackup());
                   const bad = pending > 0;
-                  const warn = !bad && (driveOn ? drDays === null || drDays >= 2 : fbDays === null || fbDays >= 7);
+                  const warn = !bad && driveOn && (drDays === null || drDays >= 2);
                   const msg = bad
                     ? `⏳ ${toBn(pending)} টা সেভ সার্ভারে যাওয়া বাকি`
                     : driveOn
@@ -4883,12 +4945,8 @@ export default function LedgerApp() {
                       ? "⚠ Drive-এ এখনও ব্যাকআপ যায়নি"
                       : drDays >= 2
                       ? `⚠ Drive-এ শেষ ব্যাকআপ ${toBn(drDays)} দিন আগের`
-                      : "✓ সুরক্ষিত — Drive-এও কপি যাচ্ছে"
-                    : fbDays === null
-                    ? "⚠ Google অ্যাকাউন্ট যুক্ত নেই, ফাইল ব্যাকআপও নেওয়া হয়নি"
-                    : fbDays >= 7
-                    ? `⚠ ব্যাকআপ ফাইল ${toBn(fbDays)} দিন আগের — নতুন নামান`
-                    : "✓ সুরক্ষিত — দৈনিক কপি চলছে";
+                      : "✓ সুরক্ষিত — নিজে নিজে ব্যাকআপ চলছে (Drive-এও যাচ্ছে)"
+                    : "✓ নিজে নিজে ব্যাকআপ চলছে — Google অ্যাকাউন্ট যুক্ত করলে আরও নিরাপদ";
                   return (
                     <div className="mb-3 px-5 py-3" style={card}>
                       <button onClick={() => setView("safety")} className="w-full flex items-center justify-between text-left active:opacity-90">
@@ -4923,291 +4981,281 @@ export default function LedgerApp() {
                   );
                 })()}
 
-                {/* স্টাফ হাজিরা ও বেতন */}
-                <button onClick={() => setView("staff")} className="w-full flex items-center justify-between px-5 py-3 mb-3 active:opacity-90" style={card}>
-                  <div className="flex items-center gap-3 text-left">
-                    <UserCheck size={24} color="var(--navy-fg)" strokeWidth={1.8} />
-                    <div>
-                      <div style={{ color: NAVY, fontSize: 15, fontWeight: 700 }}>স্টাফ হাজিরা ও বেতন</div>
-                      <div style={{ color: GRAY, fontSize: 12.5, marginTop: 2 }}>হাজিরা, অ্যাডভান্স ও বেতন — বেতন দিলে খরচে নিজে ওঠে</div>
-                    </div>
+                {/* শেষ হিসাব ওঠানো */}
+                <div className="px-5 py-3 mb-3 flex items-center justify-between" style={card}>
+                  <div style={{ color: GRAY, fontSize: 14 }}>🗓 শেষ হিসাব ওঠানো</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: lastEntry ? lastUpdateColor(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : GRAY }}>
+                    {lastEntry ? lastUpdateText(lastEntry.y * 10000 + lastEntry.m * 100 + lastEntry.d) : "—"}
                   </div>
-                  <div style={{ color: GRAY, fontSize: 20 }}>›</div>
-                </button>
-
-                {/* বাকির লিস্ট */}
-                <button onClick={() => setView("dues")} className="w-full flex items-center justify-between px-5 py-4 mb-3 active:opacity-90" style={card}>
-                  <div className="text-left">
-                    <div style={{ color: NAVY, fontSize: 18, fontWeight: 700 }}>বাকির লিস্ট</div>
-                    <div style={{ color: GRAY, fontSize: 13, marginTop: 2 }}>
-                      {allDuesLoading
-                        ? "লোড হচ্ছে…"
-                        : (() => {
-                            const old15n = allDues.filter((e) => daysSince(e.y, e.m, e.d) >= 15).length;
-                            return `${toBn(allDues.length)} টা এন্ট্রি${old15n ? ` · ⚠ ${toBn(old15n)} টা ১৫+ দিনের পুরনো` : " · দেখতে ট্যাপ করুন"}`;
-                          })()}
-                    </div>
-                  </div>
-                  <div style={{ color: "var(--red)", fontSize: 21, fontWeight: 700 }}>
-                    {allDuesLoading ? "…" : money(allDues.reduce((a, e) => a + (e.amount || 0), 0))}
-                  </div>
-                </button>
-
+                </div>
               </div>
             );
           })()}
 
-        {/* ---------- DUES (all years) ---------- */}
-        {view === "dues" && (
-          <>
-            <HeaderBar title="বাকির লিস্ট" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
-            <div className="px-3 pt-4 pb-8">
-              {editMode && (
-                <div className="rounded-xl mb-4 px-3 py-3" style={{ border: "1px solid var(--navy-line)", background: "var(--bg)" }}>
-                  <p style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 15, color: "var(--navy-fg)", marginBottom: 8 }}>
-                    সরাসরি বাকি যোগ করুন
-                  </p>
-                  <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 92px" }}>
-                    <input
-                      value={newDue.name}
-                      onChange={(ev) => setNewDue((p) => ({ ...p, name: ev.target.value, phone: p.phone || phoneOf(ev.target.value) }))}
-                      list="due-name-options"
-                      placeholder="কার বাকি (নাম)"
-                      className="min-w-0 px-2 py-2 rounded-xl outline-none"
-                      style={{ fontSize: 14, border: "1px solid var(--line)", background: "var(--card)" }}
-                    />
-                    <input
-                      value={newDue.amount}
-                      onChange={(ev) => setNewDue((p) => ({ ...p, amount: ev.target.value }))}
-                      inputMode="decimal"
-                      placeholder="টাকা"
-                      className="min-w-0 px-2 py-2 rounded-xl outline-none text-right"
-                      style={{ fontSize: 14, border: "1px solid var(--line)", background: "var(--card)", color: "var(--red)", fontWeight: 600 }}
-                    />
-                  </div>
-                  <input
-                    value={newDue.phone || ""}
-                    onChange={(ev) => setNewDue((p) => ({ ...p, phone: ev.target.value }))}
-                    inputMode="tel"
-                    placeholder="ফোন নম্বর (রিমাইন্ডার পাঠাতে — ঐচ্ছিক)"
-                    className="w-full mt-2 px-2 py-2 rounded-xl outline-none"
-                    style={{ fontSize: 13.5, border: "1px solid var(--line)", background: "var(--card)" }}
-                  />
-                  <div className="flex items-center gap-2 mt-2">
-                    <input
-                      type="date"
-                      value={newDue.date || todayInputValue()}
-                      onChange={(ev) => setNewDue((p) => ({ ...p, date: ev.target.value }))}
-                      className="min-w-0 px-2 py-1.5 rounded-xl outline-none"
-                      style={{ fontSize: 12.5, border: "1px solid var(--line)", background: "var(--card)" }}
-                    />
-                    <button
-                      onClick={handleAddManualDue}
-                      disabled={addingDue}
-                      className="ml-auto flex items-center gap-1 px-3 py-2 rounded-xl active:opacity-80"
-                      style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 13, fontWeight: 600 }}
-                    >
-                      <Plus size={14} /> {addingDue ? "…" : "বাকি যোগ করুন"}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {allDuesLoading ? (
-                <p style={{ fontSize: 12, color: "var(--gray)" }}>লোড হচ্ছে…</p>
-              ) : allDues.length === 0 ? (
-                <p style={{ fontSize: 12, color: "var(--gray)" }}>এখনও কোনো বাকি নেই।</p>
-              ) : (
-                (() => {
-                  const custMap = {};
-                  buildCustomers(memos, allDues).forEach((c) => {
-                    custMap[c.key] = c;
-                  });
-                  const withAge = allDues.map((e) => ({ e, days: daysSince(e.y, e.m, e.d) }));
-                  const old7 = withAge.filter((x) => x.days >= 7);
-                  const old15 = withAge.filter((x) => x.days >= 15);
-                  const sumOf = (arr) => arr.reduce((s, x) => s + (x.e.amount || 0), 0);
-                  const shown = withAge.filter((x) => (dueFilter === "old15" ? x.days >= 15 : dueFilter === "old7" ? x.days >= 7 : true));
-                  const chip = (id, label) => (
-                    <button
-                      key={id}
-                      onClick={() => setDueFilter(id)}
-                      className="px-3 py-1.5 rounded-full active:opacity-70"
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        border: "1px solid var(--navy-line)",
-                        background: dueFilter === id ? "var(--navy-bg)" : "var(--card)",
-                        color: dueFilter === id ? "#FFFFFF" : "var(--navy-fg)",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                  return (
-                    <>
-                      {old15.length > 0 && (
-                        <div className="rounded-xl mb-3 px-3 py-2.5" style={{ background: "var(--red-tint)", border: "1px solid var(--red)", color: "var(--red-dark)" }}>
-                          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-                            ⚠ ১৫ দিনের বেশি পুরনো বাকি: {toBn(old15.length)} টা · মোট ৳{toBn(fmt(sumOf(old15)))}
+        {/* ---------- DUES (কাস্টমার অনুযায়ী বাকির লিস্ট) ---------- */}
+        {view === "dues" &&
+          (() => {
+            const NAVY = "var(--navy-fg)";
+            const GRAY = "var(--gray)";
+            const saleMap = new Map(ledgerData.filter((r) => r.type === "বিক্রি" && r.id).map((r) => [`${r.y}-${r.m}-${r.d}-${r.id}`, r]));
+            const gm = new Map();
+            allDues.forEach((e) => {
+              const k = custKey(e.name);
+              if (!k) return;
+              if (!gm.has(k)) gm.set(k, { key: k, name: String(e.name).trim(), entries: [], total: 0 });
+              const g = gm.get(k);
+              g.entries.push(e);
+              g.total += e.amount || 0;
+            });
+            const all = [...gm.values()].map((g) => {
+              g.entries.sort((a, b) => a.y - b.y || a.m - b.m || a.d - b.d);
+              const o = g.entries[0];
+              g.days = daysSince(o.y, o.m, o.d);
+              const rg = customersReg.find((c) => custKey(c.name) === g.key);
+              if (rg) g.name = rg.name;
+              g.phone = phoneOf(g.name, g.entries.find((e) => e.phone));
+              return g;
+            });
+            const old7 = all.filter((g) => g.days >= 7);
+            const old15 = all.filter((g) => g.days >= 15);
+            const sumOf = (arr) => arr.reduce((s, g) => s + g.total, 0);
+            const shown = all
+              .filter((g) => (dueFilter === "old15" ? g.days >= 15 : dueFilter === "old7" ? g.days >= 7 : true))
+              .sort((a, b) => b.total - a.total);
+            const chip = (id, label) => (
+              <button
+                key={id}
+                onClick={() => setDueFilter(id)}
+                className="px-3 py-1.5 rounded-full active:opacity-70"
+                style={{ fontSize: 12, fontWeight: 600, border: "1px solid var(--navy-line)", background: dueFilter === id ? "var(--navy-bg)" : "var(--card)", color: dueFilter === id ? "#FFFFFF" : "var(--navy-fg)" }}
+              >
+                {label}
+              </button>
+            );
+            const entryLabel = (e) => {
+              if (e.manual && e.memoId) {
+                const mm = memos.find((x) => x.id === e.memoId);
+                return mm ? `মেমো নং ${toBn(mm.no)}` : "মেমো";
+              }
+              return e.manual ? "সরাসরি বাকি" : "বিক্রি";
+            };
+            const entryDetail = (e) => {
+              if (e.manual && e.lines && e.lines.length) return e.lines.map(lineText);
+              if (e.manual && e.memoId) {
+                const mm = memos.find((x) => x.id === e.memoId);
+                return mm ? mm.items.filter(memoItemUsed).map(lineText) : [];
+              }
+              if (!e.manual) {
+                const r = saleMap.get(`${e.y}-${e.m}-${e.d}-${e.id}`);
+                return r && r.detail ? [r.detail] : e.item ? [e.item] : [];
+              }
+              return [];
+            };
+            const inp = { fontSize: 13.5, border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)" };
+            const lines = newDue.lines || [];
+            const usedLines = lines.filter(memoItemUsed);
+            const linesTotal = usedLines.reduce((s, it) => s + (grossTotal(it) || 0), 0);
+            return (
+              <>
+                <HeaderBar title="বাকির লিস্ট" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
+                <div className="px-3 pt-4 pb-24">
+                  {editMode && (
+                    <div className="mb-4">
+                      {!showDueAdd ? (
+                        <button onClick={() => setShowDueAdd(true)} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}>
+                          <Plus size={16} /> বাকি যোগ করুন (পণ্যের বিস্তারিতসহ)
+                        </button>
+                      ) : (
+                        <div className="rounded-xl px-3 py-3" style={{ border: "2px solid var(--navy-line)", background: "var(--card)" }}>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 8 }}>নতুন বাকি যোগ করুন</div>
+                          <input value={newDue.name} onChange={(ev) => setNewDue((p) => ({ ...p, name: ev.target.value, phone: p.phone || phoneOf(ev.target.value) }))} list="due-name-options" placeholder="কাস্টমারের নাম *" className="w-full px-3 py-2 rounded-xl outline-none mb-2" style={inp} />
+                          <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                            <input value={newDue.phone || ""} onChange={(ev) => setNewDue((p) => ({ ...p, phone: ev.target.value }))} inputMode="tel" placeholder="ফোন (ঐচ্ছিক)" className="px-3 py-2 rounded-xl outline-none" style={inp} />
+                            <input type="date" value={newDue.date || todayInputValue()} onChange={(ev) => setNewDue((p) => ({ ...p, date: ev.target.value }))} className="px-2 py-2 rounded-xl outline-none" style={inp} />
                           </div>
-                          <div style={{ fontSize: 11.5, marginTop: 2 }}>নিচে WhatsApp / SMS বাটনে চাপ দিয়ে রিমাইন্ডার পাঠান।</div>
+                          <div style={{ fontSize: 12.5, color: GRAY, margin: "4px 0" }}>কী কী পণ্য নিয়েছে (বিক্রির ফর্মের মতো):</div>
+                          <div className="overflow-x-auto rounded-xl" style={{ border: "1px solid var(--line)" }}>
+                            <div style={{ minWidth: 500 }}>
+                              <div className="grid items-center" style={{ gridTemplateColumns: "1fr 46px 46px 52px 54px 64px 24px", background: "var(--orange-bg)" }}>
+                                <Th>নাম / জিনিস</Th>
+                                <Th right>হাইট</Th>
+                                <Th right>ওয়েট</Th>
+                                <Th right>পরিমান</Th>
+                                <Th right>দাম</Th>
+                                <Th right>মোট</Th>
+                                <Th />
+                              </div>
+                              {lines.map((ln, i) => (
+                                <div key={i} className="grid items-center" style={{ gridTemplateColumns: "1fr 46px 46px 52px 54px 64px 24px", borderTop: "1px solid var(--line2)" }}>
+                                  <input value={ln.name} onChange={(ev) => updateDueLine(i, "name", ev.target.value)} placeholder="যেমন: ব্যানার" className="min-w-0 px-2 py-2 bg-transparent outline-none" style={{ fontSize: 13.5, color: "var(--ink)" }} />
+                                  {["height", "weight", "qty", "price"].map((f) => (
+                                    <input key={f} value={ln[f]} onChange={(ev) => updateDueLine(i, f, ev.target.value)} inputMode="decimal" className="min-w-0 w-full px-0.5 py-2 bg-transparent outline-none text-right" style={{ fontSize: 13.5, color: "var(--ink)" }} />
+                                  ))}
+                                  <div className="px-1 text-right" style={{ fontSize: 13, fontWeight: 700, color: NAVY }}>{memoItemUsed(ln) ? fmt(grossTotal(ln) || 0) : ""}</div>
+                                  <button onClick={() => removeDueLine(i)} style={{ color: "var(--red)" }} aria-label="সারি মুছুন">
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <button onClick={addDueLine} className="w-full flex items-center justify-center gap-1 py-2 mt-1.5 rounded-xl active:opacity-70" style={{ background: "var(--bg)", color: NAVY, fontSize: 13.5, border: "1px dashed var(--line)" }}>
+                            <Plus size={14} /> পণ্য যোগ করুন
+                          </button>
+                          <div className="flex items-center justify-between gap-2 mt-3">
+                            {usedLines.length > 0 ? (
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--red)" }}>মোট বাকি ৳{toBn(fmt(linesTotal))}</div>
+                            ) : (
+                              <input value={newDue.amount} onChange={(ev) => setNewDue((p) => ({ ...p, amount: ev.target.value }))} inputMode="decimal" placeholder="পণ্য না লিখলে শুধু বাকির টাকা" className="flex-1 px-3 py-2 rounded-xl outline-none text-right" style={{ ...inp, color: "var(--red)", fontWeight: 600 }} />
+                            )}
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button onClick={() => { setShowDueAdd(false); setNewDue({ name: "", amount: "", date: "", phone: "", lines: [] }); }} className="px-4 py-2.5 rounded-xl active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 13.5, fontWeight: 600 }}>
+                              বাতিল
+                            </button>
+                            <button onClick={handleAddManualDue} disabled={addingDue} className="flex-1 py-2.5 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}>
+                              {addingDue ? "…" : "বাকি যোগ করুন"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {allDuesLoading ? (
+                    <p style={{ fontSize: 12, color: GRAY }}>লোড হচ্ছে…</p>
+                  ) : all.length === 0 ? (
+                    <p style={{ fontSize: 12, color: GRAY }}>এখনও কোনো বাকি নেই।</p>
+                  ) : (
+                    <>
+                      <div className="rounded-xl px-4 py-3 mb-3 flex items-center justify-between" style={{ background: "var(--card)", border: "1px solid var(--line)" }}>
+                        <div style={{ fontSize: 13, color: GRAY }}>{toBn(all.length)} জন কাস্টমারের মোট বাকি</div>
+                        <div style={{ fontSize: 19, fontWeight: 800, color: "var(--red)" }}>৳{toBn(fmt(sumOf(all)))}</div>
+                      </div>
+                      {old15.length > 0 && (
+                        <div className="rounded-xl mb-3 px-3 py-2.5" style={{ background: "var(--red-tint)", border: "1px solid var(--red)", color: "var(--red-dark)", fontSize: 13, fontWeight: 700 }}>
+                          ⚠ ১৫ দিনের বেশি পুরনো বাকি: {toBn(old15.length)} জন · ৳{toBn(fmt(sumOf(old15)))}
                         </div>
                       )}
                       <div className="flex gap-2 mb-3 flex-wrap">
-                        {chip("all", `সব (${toBn(withAge.length)})`)}
+                        {chip("all", `সব (${toBn(all.length)})`)}
                         {chip("old7", `৭+ দিন (${toBn(old7.length)})`)}
                         {chip("old15", `১৫+ দিন (${toBn(old15.length)})`)}
                       </div>
-                      {shown.length === 0 ? (
-                        <p style={{ fontSize: 12, color: "var(--gray)" }}>এই ভাগে কোনো বাকি নেই।</p>
-                      ) : (
-                        <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--navy-line)" }}>
-                          <div className="grid grid-cols-[84px,1fr,70px]" style={{ background: "var(--navy-bg)" }}>
-                            <Th small>তারিখ</Th>
-                            <Th>নাম</Th>
-                            <Th right>বাকি</Th>
-                          </div>
-                          {shown.map(({ e, days }, i) => {
-                            const stage = days >= 30 ? 3 : days >= 15 ? 2 : days >= 7 ? 1 : 0;
-                            const stBg = ["var(--card)", "var(--amber-tint)", "var(--red-tint)", "var(--red-tint2)"][stage];
-                            const stBorder = ["transparent", "var(--orange)", "var(--red)", "var(--red-dark)"][stage];
-                            const stColor = stage === 1 ? "var(--amber-text)" : "var(--red)";
-                            const key = `${e.y}-${e.m}-${e.d}-${e.id}`;
-                            const input = paymentInputs[key] || {};
-                            const phone = phoneOf(e.name, e);
-                            const cust = custMap[custKey(e.name)];
-                            const open = openDue === key || stage >= 1;
-                            return (
-                              <div key={i} style={{ borderTop: "1px solid var(--line2)" }}>
-                                <div
-                                  onClick={() => setOpenDue(openDue === key ? null : key)}
-                                  className="grid grid-cols-[84px,1fr,70px] items-center"
-                                  style={{ background: stBg, borderLeft: `3px solid ${stBorder}`, cursor: "pointer" }}
-                                >
-                                  <div className="px-2 py-1.5" style={{ fontSize: 11.5, color: "var(--gray)" }}>
-                                    {toBn(e.d)} {MONTH_NAMES[e.m - 1].slice(0, 3)} {toBn(e.y)}
-                                  </div>
-                                  <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "var(--ink)" }}>
-                                    {e.name}{e.item ? <span style={{ fontSize: 10.5, color: "var(--gray)" }}> · {e.item}</span> : null}
-                                    {stage >= 1 && (
-                                      <span style={{ fontSize: 9.5, color: stColor, marginLeft: 5, fontWeight: 700 }}>
-                                        {stage === 1 ? "⏰" : stage === 2 ? "⚠" : "⚠⚠"} {toBn(days)} দিন
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="px-2 py-1.5 text-right" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--red)" }}>
-                                    {fmt(e.amount)}
-                                  </div>
+                      {shown.map((g) => {
+                        const stage = g.days >= 30 ? 3 : g.days >= 15 ? 2 : g.days >= 7 ? 1 : 0;
+                        const stBg = ["var(--card)", "var(--amber-tint)", "var(--red-tint)", "var(--red-tint2)"][stage];
+                        const stBorder = ["var(--navy-line)", "var(--orange)", "var(--red)", "var(--red-dark)"][stage];
+                        const open = dueOpen === g.key;
+                        const f = settleForm && settleForm.key === g.key ? settleForm : { key: g.key, paid: "", waive: "", date: todayInputValue() };
+                        const setF = (patch) => setSettleForm({ ...f, ...patch });
+                        const paidN = num(f.paid) || 0;
+                        const waiveN = num(f.waive) || 0;
+                        const left = g.total - paidN - waiveN;
+                        const msg = dueMessageTotal(g.name, g.total);
+                        const cust = customersReg.find((c) => custKey(c.name) === g.key) || memos.find((x) => custKey(x.customer) === g.key);
+                        return (
+                          <div key={g.key} className="rounded-xl mb-2.5 overflow-hidden" style={{ border: "1px solid var(--line)", borderLeft: `5px solid ${stBorder}`, background: "var(--card)" }}>
+                            <button onClick={() => setDueOpen(open ? null : g.key)} className="w-full flex items-center justify-between gap-3 px-3 py-3 text-left active:opacity-90" style={{ background: stBg }}>
+                              <div className="min-w-0">
+                                <div className="truncate" style={{ fontSize: 17, fontWeight: 800, color: "var(--blue)" }}>{g.name}</div>
+                                <div style={{ fontSize: 11.5, color: GRAY, marginTop: 1 }}>
+                                  {toBn(g.entries.length)} টা এন্ট্রি · সবচেয়ে পুরনো {g.days <= 0 ? "আজকের" : `${toBn(g.days)} দিন আগের`}
+                                  {stage >= 1 ? (stage === 1 ? " ⏰" : " ⚠") : ""}
                                 </div>
-                                {open && (
-                                  <div
-                                    className="flex items-center gap-1.5 px-2 py-1.5 flex-wrap"
-                                    style={{ background: stBg, borderLeft: `3px solid ${stBorder}`, borderTop: "1px dashed var(--line2)" }}
-                                  >
-                                    <button
-                                      onClick={() => openWhatsApp(phone, dueMessage(e.name, e.amount, e.y, e.m, e.d))}
-                                      className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70"
-                                      style={{ background: "var(--green-tint)", color: "var(--green-dark)", fontSize: 11.5, fontWeight: 700 }}
-                                    >
-                                      <MessageCircle size={12} /> WhatsApp
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div style={{ fontSize: 18, fontWeight: 800, color: "var(--red)" }}>৳{toBn(fmt(g.total))}</div>
+                                <span style={{ color: GRAY, fontSize: 14 }}>{open ? "▲" : "▼"}</span>
+                              </div>
+                            </button>
+                            {open && (
+                              <div className="px-3 pb-3 pt-1" style={{ borderTop: "1px solid var(--line2)" }}>
+                                <div className="flex items-center gap-1.5 flex-wrap py-2">
+                                  <button onClick={() => openWhatsApp(g.phone, msg)} className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70" style={{ background: "var(--green-tint)", color: "var(--green-dark)", fontSize: 11.5, fontWeight: 700 }}>
+                                    <MessageCircle size={12} /> WhatsApp
+                                  </button>
+                                  <button onClick={() => openSms(g.phone, msg)} className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70" style={{ background: "var(--tint)", color: NAVY, fontSize: 11.5, fontWeight: 700 }}>
+                                    <MessageSquare size={12} /> SMS
+                                  </button>
+                                  {g.phone && (
+                                    <button onClick={() => openCall(g.phone)} className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70" style={{ background: "var(--tint)", color: NAVY, fontSize: 11.5, fontWeight: 700 }}>
+                                      <Phone size={12} /> কল
                                     </button>
-                                    <button
-                                      onClick={() => openSms(phone, dueMessage(e.name, e.amount, e.y, e.m, e.d))}
-                                      className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70"
-                                      style={{ background: "var(--tint)", color: "var(--navy-fg)", fontSize: 11.5, fontWeight: 700 }}
-                                    >
-                                      <MessageSquare size={12} /> SMS
+                                  )}
+                                  {cust && (
+                                    <button onClick={() => { setCustSel(g.key); setView("customers"); }} className="px-2.5 py-1 rounded-full active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 11.5, fontWeight: 700 }}>
+                                      পুরো হিসাব ›
                                     </button>
-                                    {phone && (
-                                      <button
-                                        onClick={() => openCall(phone)}
-                                        className="flex items-center gap-1 px-2.5 py-1 rounded-full active:opacity-70"
-                                        style={{ background: "var(--tint)", color: "var(--navy-fg)", fontSize: 11.5, fontWeight: 700 }}
-                                      >
-                                        <Phone size={12} /> কল
+                                  )}
+                                  <span style={{ fontSize: 10.5, color: GRAY }}>{g.phone || "ফোন নম্বর নেই"}</span>
+                                </div>
+                                {g.entries.map((e) => {
+                                  const det = entryDetail(e);
+                                  return (
+                                    <div key={`${e.y}-${e.m}-${e.d}-${e.id}`} className="py-2" style={{ borderTop: "1px solid var(--line2)" }}>
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>
+                                          {toBn(e.d)} {MONTH_NAMES[e.m - 1]} {toBn(e.y)} · {entryLabel(e)}
+                                        </span>
+                                        <span className="flex items-center gap-2">
+                                          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--red)" }}>৳{toBn(fmt(e.amount))}</span>
+                                          {editMode && e.manual && (
+                                            <button onClick={() => handleDeleteManualDue(e)} style={{ color: "var(--red)" }} aria-label="এই বাকি মুছুন">
+                                              <Trash2 size={13} />
+                                            </button>
+                                          )}
+                                        </span>
+                                      </div>
+                                      {det.map((t, i) => (
+                                        <div key={i} style={{ fontSize: 11.5, color: GRAY, marginTop: 2 }}>• {t}</div>
+                                      ))}
+                                    </div>
+                                  );
+                                })}
+
+                                {editMode ? (
+                                  <div className="mt-3 rounded-xl px-3 py-3" style={{ background: "var(--tint)" }}>
+                                    <div style={{ fontSize: 13.5, fontWeight: 700, color: NAVY, marginBottom: 6 }}>জমা / ছাড় নিন</div>
+                                    <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                                      <input value={f.paid} onChange={(ev) => setF({ paid: ev.target.value })} inputMode="decimal" placeholder="টাকা পেলাম" className="px-3 py-2 rounded-xl outline-none text-right" style={{ ...inp, color: "var(--green)", fontWeight: 600 }} />
+                                      <input value={f.waive} onChange={(ev) => setF({ waive: ev.target.value })} inputMode="decimal" placeholder="ছাড় (মাফ)" className="px-3 py-2 rounded-xl outline-none text-right" style={{ ...inp, color: "var(--orange)", fontWeight: 600 }} />
+                                    </div>
+                                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                      <input type="date" value={f.date} onChange={(ev) => setF({ date: ev.target.value })} className="px-2 py-1.5 rounded-xl outline-none" style={{ ...inp, fontSize: 12.5 }} />
+                                      <button onClick={() => setF({ paid: String(g.total), waive: "" })} className="px-2.5 py-1 rounded-full active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 11.5, fontWeight: 700 }}>
+                                        পুরোটা জমা
                                       </button>
-                                    )}
-                                    {cust && (
-                                      <button
-                                        onClick={() => {
-                                          setCustSel(cust.key);
-                                          setView("customers");
-                                        }}
-                                        className="px-2.5 py-1 rounded-full active:opacity-70"
-                                        style={{ border: "1px solid var(--navy-line)", color: "var(--navy-fg)", fontSize: 11.5, fontWeight: 700 }}
-                                      >
-                                        পুরো হিসাব ›
+                                      <button onClick={() => setF({ waive: String(Math.max(0, g.total - paidN)) })} className="px-2.5 py-1 rounded-full active:opacity-70" style={{ border: "1px solid var(--orange)", color: "var(--orange)", fontSize: 11.5, fontWeight: 700 }}>
+                                        বাকিটুকু ছাড়
                                       </button>
-                                    )}
-                                    <span style={{ fontSize: 10.5, color: "var(--gray)" }}>{phone ? phone : "ফোন নম্বর নেই"}</span>
+                                    </div>
+                                    <div style={{ fontSize: 12.5, color: left < 0 ? "var(--red)" : "var(--ink)", marginBottom: 8, lineHeight: 1.6 }}>
+                                      বাকি ৳{toBn(fmt(g.total))} − জমা ৳{toBn(fmt(paidN))} − ছাড় ৳{toBn(fmt(waiveN))} = <b>৳{toBn(fmt(left))}</b>
+                                      {left < 0 ? " (বাকির চেয়ে বেশি!)" : left === 0 && (paidN > 0 || waiveN > 0) ? " ✓ পুরো শোধ" : ""}
+                                    </div>
+                                    <button onClick={() => settleCustomerDues(g)} disabled={settlingBusy || left < 0 || (paidN <= 0 && waiveN <= 0)} className="w-full py-2.5 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "#FFFFFF", fontSize: 14, fontWeight: 700, opacity: settlingBusy || left < 0 || (paidN <= 0 && waiveN <= 0) ? 0.6 : 1 }}>
+                                      {settlingBusy ? "…" : "জমা নিন"}
+                                    </button>
+                                    <p style={{ fontSize: 11, color: GRAY, marginTop: 6, lineHeight: 1.6 }}>
+                                      পুরনো বাকি আগে শোধ হয়। পাওয়া টাকাটা এই তারিখের আয়ে "{g.name} (পরিশোধ)" নামে ওঠে। ছাড়ের টাকা আয়ে ওঠে না, শুধু বাকি থেকে বাদ যায়।
+                                    </p>
                                   </div>
-                                )}
-                                {editMode && (
-                                  <div
-                                    className="flex items-center gap-1.5 px-2 py-1.5"
-                                    style={{ background: "var(--bg)", borderTop: "1px dashed var(--line)" }}
-                                  >
-                                    <span style={{ fontSize: 10.5, color: "var(--navy-fg)", fontWeight: 600, whiteSpace: "nowrap" }}>পরিশোধ:</span>
-                                    <input
-                                      value={input.amount || ""}
-                                      onChange={(ev) =>
-                                        setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], amount: ev.target.value } }))
-                                      }
-                                      inputMode="decimal"
-                                      placeholder="টাকা"
-                                      className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
-                                      style={{ width: 64, fontSize: 11, border: "1px solid var(--line)", background: "var(--card)" }}
-                                    />
-                                    <input
-                                      type="date"
-                                      value={input.date || todayInputValue()}
-                                      onChange={(ev) =>
-                                        setPaymentInputs((prev) => ({ ...prev, [key]: { ...prev[key], date: ev.target.value } }))
-                                      }
-                                      className="min-w-0 px-1.5 py-1 rounded-xl outline-none"
-                                      style={{ fontSize: 10.5, border: "1px solid var(--line)", background: "var(--card)" }}
-                                    />
-                                    <button
-                                      onClick={() => handleSettlePayment(e, key)}
-                                      disabled={payingKey !== null || !num(input.amount) || num(input.amount) <= 0}
-                                      className="px-2.5 py-1 rounded-xl active:opacity-70 ml-auto"
-                                      style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}
-                                    >
-                                      {payingKey === key ? "…" : "জমা করুন"}
-                                    </button>
-                                    {e.manual && (
-                                      <button
-                                        onClick={() => handleDeleteManualDue(e)}
-                                        className="p-1 active:opacity-60"
-                                        style={{ color: "var(--red)" }}
-                                        aria-label="এই বাকি মুছুন"
-                                      >
-                                        <Trash2 size={14} />
-                                      </button>
-                                    )}
-                                  </div>
+                                ) : (
+                                  <p style={{ fontSize: 11.5, color: GRAY, marginTop: 8 }}>জমা বা ছাড় নিতে এডিট মোড চালু করুন।</p>
                                 )}
                               </div>
-                            );
-                          })}
-                          <div className="grid grid-cols-[84px,1fr,70px] items-center" style={{ borderTop: "1px solid var(--navy-line)", background: "var(--tint)" }}>
-                            <div />
-                            <div className="px-2 py-1.5" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 13, color: "var(--navy-fg)" }}>
-                              {dueFilter === "all" ? "মোট বাকি" : "এই ভাগের মোট"}
-                            </div>
-                            <div className="px-2 py-1.5 text-right" style={{ fontSize: 13.5, fontWeight: 700, color: "var(--navy-fg)" }}>
-                              {fmt(sumOf(shown))}
-                            </div>
+                            )}
                           </div>
-                        </div>
-                      )}
+                        );
+                      })}
+                      {shown.length === 0 && <p style={{ fontSize: 12, color: GRAY }}>এই ভাগে কোনো বাকি নেই।</p>}
                     </>
-                  );
-                })()
-              )}
-            </div>
-          </>
-        )}
+                  )}
+                </div>
+              </>
+            );
+          })()}
 
         {/* ---------- MEMOS (কাস্টমার মেমো) ---------- */}
         {view === "memos" && (
@@ -5771,6 +5819,166 @@ export default function LedgerApp() {
           </>
         )}
 
+        {/* ---------- PAYABLES (আমি কাকে কত দেব) ---------- */}
+        {view === "payables" &&
+          (() => {
+            const NAVY = "var(--navy-fg)";
+            const GRAY = "var(--gray)";
+            const box = { background: "var(--card)", border: "1px solid var(--line)" };
+            const inp = { fontSize: 13.5, border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)" };
+            const gm = new Map();
+            pbList.forEach((en) => {
+              const k = custKey(en.name);
+              if (!k) return;
+              if (!gm.has(k)) gm.set(k, { key: k, name: String(en.name).trim(), entries: [], total: 0 });
+              const g = gm.get(k);
+              g.entries.push(en);
+              g.total += Math.max(0, (en.amount || 0) - (en.paid || 0));
+            });
+            const all = [...gm.values()].map((g) => {
+              g.entries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+              return g;
+            });
+            const open = all.filter((g) => g.total > 0).sort((a, b) => b.total - a.total);
+            const done = all.filter((g) => g.total <= 0);
+            const list = pbShowPaid ? [...open, ...done] : open;
+            const fmtD = (ds) => {
+              const d = parseYmd(ds);
+              return d ? `${toBn(d.dd)} ${MONTH_NAMES[d.mm - 1]} ${toBn(d.yy)}` : ds;
+            };
+            return (
+              <>
+                <HeaderBar title="আমি কাকে কত দেব" onBack={() => setView("years")} editMode={editMode} onToggleMode={toggleEditMode} />
+                <div className="px-3 pt-4 pb-24">
+                  {editMode &&
+                    (!pbShowAdd ? (
+                      <button onClick={() => setPbShowAdd(true)} className="w-full flex items-center justify-center gap-1.5 py-2.5 mb-3 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}>
+                        <Plus size={16} /> নতুন পাওনা যোগ করুন
+                      </button>
+                    ) : (
+                      <div className="rounded-xl mb-3 px-3 py-3" style={{ border: "2px solid var(--navy-line)", background: "var(--card)" }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 8 }}>কাকে কত দিতে হবে</div>
+                        <input value={pbAdd.name} onChange={(e) => setPbAdd((p) => ({ ...p, name: e.target.value }))} list="pb-name-options" placeholder="কার পাওনা (নাম) *" className="w-full px-3 py-2 rounded-xl outline-none mb-2" style={inp} />
+                        <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                          <input value={pbAdd.amount} onChange={(e) => setPbAdd((p) => ({ ...p, amount: e.target.value }))} inputMode="decimal" placeholder="টাকা *" className="px-3 py-2 rounded-xl outline-none text-right" style={inp} />
+                          <input type="date" value={pbAdd.date || todayInputValue()} onChange={(e) => setPbAdd((p) => ({ ...p, date: e.target.value }))} className="px-2 py-2 rounded-xl outline-none" style={inp} />
+                        </div>
+                        <input value={pbAdd.note} onChange={(e) => setPbAdd((p) => ({ ...p, note: e.target.value }))} placeholder="কিসের জন্য (যেমন: কালি, কাগজ)" className="w-full px-3 py-2 rounded-xl outline-none mb-2" style={inp} />
+                        <div className="flex gap-2">
+                          <button onClick={() => setPbShowAdd(false)} className="px-4 py-2.5 rounded-xl" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 13.5 }}>বাতিল</button>
+                          <button onClick={addPayable} className="flex-1 py-2.5 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "var(--on-navy)", fontSize: 14, fontWeight: 700 }}>পাওনা যোগ করুন</button>
+                        </div>
+                      </div>
+                    ))}
+                  <datalist id="pb-name-options">
+                    {all.map((g) => (
+                      <option key={g.key} value={g.name} />
+                    ))}
+                  </datalist>
+                  <div className="rounded-xl px-4 py-3 mb-3 flex items-center justify-between" style={box}>
+                    <div style={{ fontSize: 13, color: GRAY }}>{toBn(open.length)} জনকে মোট দিতে হবে</div>
+                    <div style={{ fontSize: 19, fontWeight: 800, color: "var(--orange)" }}>৳{toBn(fmt(open.reduce((s, g) => s + g.total, 0)))}</div>
+                  </div>
+                  {list.length === 0 ? (
+                    <p style={{ fontSize: 12, color: GRAY }}>কাউকে কিছু দিতে হবে না। {editMode ? "" : "(যোগ করতে এডিট মোড চালু করুন)"}</p>
+                  ) : (
+                    list.map((g) => {
+                      const isOpen = pbOpen === g.key;
+                      const f = pbPay && pbPay.key === g.key ? pbPay : { key: g.key, amount: "", date: todayInputValue(), note: "", toExpense: true };
+                      const setF = (patch) => setPbPay({ ...f, ...patch });
+                      const myPays = pbPays.filter((p) => p.key === g.key).sort((a, b) => (a.date < b.date ? 1 : -1));
+                      return (
+                        <div key={g.key} className="rounded-xl mb-2.5 overflow-hidden" style={{ ...box, borderLeft: "5px solid var(--orange)", opacity: g.total <= 0 ? 0.7 : 1 }}>
+                          <button onClick={() => setPbOpen(isOpen ? null : g.key)} className="w-full flex items-center justify-between gap-3 px-3 py-3 text-left active:opacity-90">
+                            <div className="min-w-0">
+                              <div className="truncate" style={{ fontSize: 17, fontWeight: 800, color: "var(--blue)" }}>{g.name}</div>
+                              <div style={{ fontSize: 11.5, color: GRAY }}>{toBn(g.entries.length)} টা পাওনা{g.total <= 0 ? " · সব শোধ ✓" : ""}</div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div style={{ fontSize: 18, fontWeight: 800, color: g.total > 0 ? "var(--orange)" : "var(--green)" }}>৳{toBn(fmt(g.total))}</div>
+                              <span style={{ color: GRAY, fontSize: 14 }}>{isOpen ? "▲" : "▼"}</span>
+                            </div>
+                          </button>
+                          {isOpen && (
+                            <div className="px-3 pb-3" style={{ borderTop: "1px solid var(--line2)" }}>
+                              {g.entries.map((en) => (
+                                <div key={en.id} className="py-2" style={{ borderTop: "1px solid var(--line2)" }}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>{fmtD(en.date)}</span>
+                                    <span className="flex items-center gap-2">
+                                      <span style={{ fontSize: 13, fontWeight: 800, color: "var(--orange)" }}>৳{toBn(fmt(en.amount))}</span>
+                                      {editMode && (en.paid || 0) === 0 && (
+                                        <button onClick={() => deletePayable(en)} style={{ color: "var(--red)" }} aria-label="পাওনা মুছুন">
+                                          <Trash2 size={13} />
+                                        </button>
+                                      )}
+                                    </span>
+                                  </div>
+                                  {en.note && <div style={{ fontSize: 11.5, color: GRAY }}>• {en.note}</div>}
+                                  {(en.paid || 0) > 0 && (
+                                    <div style={{ fontSize: 11.5, color: "var(--green)" }}>
+                                      দেওয়া হয়েছে ৳{toBn(fmt(en.paid))} · বাকি ৳{toBn(fmt(Math.max(0, en.amount - en.paid)))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                              {myPays.length > 0 && (
+                                <div className="mt-2">
+                                  <div style={{ fontSize: 12, color: GRAY }}>যা যা দেওয়া হয়েছে</div>
+                                  {myPays.map((p) => (
+                                    <div key={p.id} className="flex items-center justify-between py-1" style={{ borderTop: "1px solid var(--line2)", fontSize: 12.5 }}>
+                                      <span style={{ color: "var(--ink)" }}>
+                                        {fmtD(p.date)} · ৳{toBn(fmt(p.amount))}
+                                        {p.note ? ` · ${p.note}` : ""}
+                                        {p.expId ? " (খরচে আছে)" : ""}
+                                      </span>
+                                      {editMode && (
+                                        <button onClick={() => deletePayablePay(p)} style={{ color: "var(--red)" }} aria-label="এই পরিশোধ মুছুন">
+                                          <Trash2 size={13} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {editMode && g.total > 0 && (
+                                <div className="mt-3 rounded-xl px-3 py-3" style={{ background: "var(--tint)" }}>
+                                  <div style={{ fontSize: 13.5, fontWeight: 700, color: NAVY, marginBottom: 6 }}>টাকা দিলাম</div>
+                                  <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                                    <input value={f.amount} onChange={(e) => setF({ amount: e.target.value })} inputMode="decimal" placeholder={`কত টাকা (বাকি ${toBn(fmt(g.total))})`} className="px-3 py-2 rounded-xl outline-none text-right" style={inp} />
+                                    <input type="date" value={f.date} onChange={(e) => setF({ date: e.target.value })} className="px-2 py-2 rounded-xl outline-none" style={inp} />
+                                  </div>
+                                  <input value={f.note} onChange={(e) => setF({ note: e.target.value })} placeholder="নোট (ঐচ্ছিক)" className="w-full px-3 py-2 rounded-xl outline-none mb-2" style={inp} />
+                                  <label className="flex items-center gap-2 mb-2" style={{ fontSize: 12.5, color: "var(--ink)" }}>
+                                    <input type="checkbox" checked={f.toExpense !== false} onChange={(e) => setF({ toExpense: e.target.checked })} /> এই তারিখের খরচে লিখুন (ক্যাশ থেকে গেলে টিক রাখুন)
+                                  </label>
+                                  <div className="flex gap-2">
+                                    <button onClick={() => setF({ amount: String(g.total) })} className="px-3 py-2 rounded-xl active:opacity-70" style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12.5, fontWeight: 700 }}>
+                                      পুরোটা
+                                    </button>
+                                    <button onClick={() => payPayable(g)} disabled={settlingBusy} className="flex-1 py-2 rounded-xl active:opacity-80" style={{ background: "var(--navy-bg)", color: "#FFFFFF", fontSize: 14, fontWeight: 700, opacity: settlingBusy ? 0.6 : 1 }}>
+                                      {settlingBusy ? "…" : "দেওয়া হয়েছে — সেভ"}
+                                    </button>
+                                  </div>
+                                  <p style={{ fontSize: 11, color: GRAY, marginTop: 6, lineHeight: 1.6 }}>পুরনো পাওনা আগে শোধ হয়। টিক রাখলে "পাওনা পরিশোধ — {g.name}" নামে ওই দিনের খরচে ওঠে।</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                  {done.length > 0 && (
+                    <button onClick={() => setPbShowPaid((v) => !v)} style={{ fontSize: 12, color: GRAY }}>
+                      {pbShowPaid ? "শোধ হয়ে যাওয়াগুলো লুকান" : `শোধ হয়ে যাওয়া ${toBn(done.length)} জন দেখান`}
+                    </button>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+
         {/* ---------- STAFF (স্টাফ হাজিরা ও বেতন) ---------- */}
         {view === "staff" &&
           (() => {
@@ -5853,7 +6061,7 @@ export default function LedgerApp() {
                       <p style={{ fontSize: 11.5, color: GRAY, lineHeight: 1.6, marginBottom: 8 }}>
                         {staffForm.type === "daily"
                           ? "দৈনিক: বেতন = দৈনিক টাকা × উপস্থিত দিন (অর্ধদিবস = আধা)।"
-                          : "মাসিক: প্রতিদিনের হার = মাসিক বেতন ÷ ওই মাসের দিন সংখ্যা। বেতন = হার × উপস্থিত দিন (অর্ধদিবস = আধা)। পুরো মাস উপস্থিত থাকলে পুরো বেতন।"}
+                          : "মাসিক: প্রতি মাস ৩০ দিন ধরা হয়। প্রতিদিনের হার = মাসিক বেতন ÷ ৩০। বেতন = হার × উপস্থিত দিন (অর্ধদিবস = আধা)। ৩১ দিনের মাসে সব দিন এলেও বেতন মাসিক বেতনের বেশি হয় না।"}
                       </p>
                       {staffForm.id && (
                         <label className="flex items-center gap-2 mb-2" style={{ fontSize: 13, color: "var(--ink)" }}>
@@ -6080,8 +6288,6 @@ export default function LedgerApp() {
               const [yy, mm, dd] = ds.split("-").map(Number);
               return `${toBn(dd)} ${MONTH_NAMES[mm - 1]} ${toBn(yy)}`;
             };
-            const fb = safety ? safety.fileDate : null;
-            const fbDays = fb ? Math.floor((Date.now() - new Date(fb + "T00:00:00").getTime()) / 86400000) : null;
             const latest = safety && safety.idx && safety.idx[0];
             const localLatest = safety && safety.local.find((c) => c.name === "snap-latest");
             const dLastDate = lastDriveBackup();
@@ -6141,11 +6347,6 @@ export default function LedgerApp() {
                           safety.idx === null ? "নেট নেই — দেখা যাচ্ছে না" : latest ? `${fmtDate(latest.date)} (${toBn(latest.keys)} টা ডেটা)` : "এখনো নেই"
                         )}
                         {row(!!localLatest, "এই ডিভাইসের নিজস্ব কপি", localLatest ? fmtDate(localLatest.date) : "এখনো নেই")}
-                        {row(
-                          fbDays !== null && fbDays < 7,
-                          "ব্যাকআপ ফাইল (আপনার হাতে)",
-                          fbDays === null ? "কখনো নামানো হয়নি" : fbDays === 0 ? "আজ ✓" : `${toBn(fbDays)} দিন আগে${fbDays >= 7 ? " — নতুন নামান" : ""}`
-                        )}
                         {row(driveRowOk, "Google Drive-এ শেষ ব্যাকআপ", driveRowText)}
                         {row(safety.conflicts.length === 0 ? true : null, "মিলিয়ে নেওয়া সংঘর্ষ", safety.conflicts.length === 0 ? "নেই ✓" : `${toBn(safety.conflicts.length)} টা (নিচে)`)}
                       </>
@@ -6160,7 +6361,6 @@ export default function LedgerApp() {
                         <p style={{ fontSize: 11.5, color: GRAY, lineHeight: 1.6, margin: "4px 0 10px" }}>
                           প্রতিদিন অ্যাপ খুললে নিজে থেকে ব্যাকআপ Drive-এর "RK হিসাব ব্যাকআপ" ফোল্ডারে যায় (শেষ ৩০টা রাখা হয়)। নেট না থাকলে পরের বার যাবে।
                         </p>
-                        {btn("☁ এখনই Drive-এ পাঠান", driveBackupNow, true)}
                         <button onClick={disconnectDrive} className="mt-1" style={{ fontSize: 12, color: "var(--red)" }}>
                           সংযোগ বিচ্ছিন্ন করুন
                         </button>
@@ -6199,15 +6399,6 @@ export default function LedgerApp() {
                         {btn("✓ সংযুক্ত করুন", connectDrive, true)}
                       </>
                     )}
-                  </div>
-
-                  <div className="rounded-xl px-4 py-3 mb-3" style={box}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 6 }}>ব্যাকআপ নিন</div>
-                    {btn("📤 ব্যাকআপ ফাইল নামান / পাঠান (Drive, WhatsApp)", doExportFile, true)}
-                    {btn("🛡 এখনই নিরাপত্তা-কপি নিন (সার্ভার + এই ডিভাইস)", doSnapshotNow)}
-                    <p style={{ fontSize: 11.5, color: GRAY, lineHeight: 1.6 }}>
-                      প্রতিদিন অ্যাপ খুললে নিজে থেকে সার্ভারে নিরাপত্তা-কপি নেওয়া হয় (শেষ ১৪ দিন + প্রতি মাসের একটা রাখা হয়) আর এই ডিভাইসেও একটা কপি থাকে। ব্যাকআপ ফাইলটা নিজের Google Drive বা WhatsApp-এ রেখে দিন, সপ্তাহে অন্তত একবার — তাহলে সার্ভারে কিছু হলেও আপনার কাছে সব থাকবে। ফাইলে পাসওয়ার্ড/পিন থাকে না।
-                    </p>
                   </div>
 
                   <div ref={restoreRef} className="rounded-xl px-4 py-3 mb-3" style={box}>
@@ -6488,6 +6679,13 @@ export default function LedgerApp() {
                                   <div className="px-1 py-1.5 text-right" style={{ fontSize: 11.5, fontWeight: 700, color: r.due > 0 ? "var(--red)" : GRAY }}>
                                     {fmt(r.due)}
                                   </div>
+                                  {r.detail && r.detail.length > 0 && (
+                                    <div className="px-2 pb-1.5" style={{ gridColumn: "1 / -1", fontSize: 11, color: GRAY, lineHeight: 1.55 }}>
+                                      {r.detail.map((t, k) => (
+                                        <div key={k}>• {t}</div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
