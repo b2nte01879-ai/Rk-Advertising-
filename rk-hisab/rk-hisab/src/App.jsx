@@ -10,6 +10,7 @@ const MONTH_NAMES = [
   "জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন",
   "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর",
 ];
+const MONTH_SHORT = ["জানু", "ফেব্রু", "মার্চ", "এপ্রি", "মে", "জুন", "জুলা", "আগ", "সেপ্টে", "অক্টো", "নভে", "ডিসে"];
 const WEEKDAY_NAMES = ["রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার"];
 const getWeekday = (y, m, d) => WEEKDAY_NAMES[new Date(y, m - 1, d).getDay()];
 
@@ -1772,6 +1773,199 @@ async function addToTrash(entry) {
 
 // ---------- PDF বানানো ও শেয়ার (কোনো বাড়তি লাইব্রেরি ছাড়া) ----------
 // মেমো/বিবরণীকে ক্যানভাসে এঁকে JPEG করা হয়, তারপর সেটা PDF পাতায় বসানো হয়
+// ---------- প্রিন্ট ডকুমেন্টের নতুন নকশা (মেমো, হিসাবের বিবরণী, মাসিক রিপোর্ট) ----------
+const bf = (n) => toBn(fmt(n));
+const DOC_FONT = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700;800&display=swap">';
+const DOC_CSS = `
+@page{size:A4;margin:11mm;}
+*{box-sizing:border-box;}
+body{font-family:'Noto Sans Bengali','Segoe UI',sans-serif;margin:0;padding:22px;color:#1B2340;background:#fff;font-size:13px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.sheet{max-width:830px;margin:0 auto;}
+.band{display:flex;align-items:center;justify-content:space-between;gap:16px;background:linear-gradient(135deg,#1F2F5C 0%,#2B4283 100%);color:#fff;border-radius:14px;padding:16px 20px;}
+.band .brand{display:flex;align-items:center;gap:14px;min-width:0;}
+.band .logo{height:56px;max-width:112px;object-fit:contain;background:#fff;border-radius:10px;padding:4px;}
+.band h1{margin:0;font-size:21px;font-weight:800;line-height:1.25;}
+.band p{margin:3px 0 0;font-size:11.5px;opacity:.88;line-height:1.5;}
+.band .tag{text-align:right;flex-shrink:0;}
+.band .tag .t{font-size:11px;letter-spacing:.6px;opacity:.82;}
+.band .tag .n{font-size:23px;font-weight:800;line-height:1.15;}
+.band .tag .d{font-size:12px;opacity:.92;margin-top:2px;}
+.panel{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;background:#F5F6FA;border:1px solid #E3E7F3;border-radius:12px;padding:12px 16px;margin-top:14px;}
+.panel .k{font-size:11px;color:#6B7390;margin-bottom:2px;}
+.panel .v{font-size:16px;font-weight:800;color:#1B2340;}
+.panel .s{font-size:12.5px;color:#4A5272;line-height:1.6;}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px;}
+.kpi{border-radius:12px;padding:10px 14px;border:1px solid #E3E7F3;background:#F5F6FA;}
+.kpi .k{font-size:11px;color:#6B7390;}
+.kpi .v{font-size:19px;font-weight:800;line-height:1.3;}
+.kpi.navy{background:#E8EBF5;border-color:#D3D9EE;}.kpi.navy .v{color:#1F2F5C;}
+.kpi.green{background:#E3F4EA;border-color:#C7E6D3;}.kpi.green .v{color:#1E7A47;}
+.kpi.orange{background:#FFF3E3;border-color:#F4DDBB;}.kpi.orange .v{color:#B2661F;}
+.kpi.red{background:#FBEAE7;border-color:#F0CBC6;}.kpi.red .v{color:#B24A45;}
+table.items{width:100%;border-collapse:separate;border-spacing:0;margin-top:14px;border:1px solid #D9DDEB;border-radius:12px;overflow:hidden;}
+table.items th{background:#1F2F5C;color:#fff;font-size:12px;font-weight:600;padding:8px 10px;text-align:left;white-space:nowrap;}
+table.items td{padding:8px 10px;font-size:12.5px;border-top:1px solid #E8EAF2;vertical-align:top;}
+table.items th.r{text-align:right;}
+table.items th.c{text-align:center;}
+table.items tbody:not(.g) tr:nth-child(even) td{background:#F8F9FC;}
+table.items tbody.g:nth-of-type(even) td{background:#F8F9FC;}
+table.items tbody.g tr + tr td{border-top:none;}
+table.items tfoot td{background:#E8EBF5;font-weight:800;color:#1F2F5C;border-top:2px solid #1F2F5C;}
+table.items td.sub{padding:0 10px 9px 12px;border-top:none;font-size:11.5px;color:#6B7390;line-height:1.6;}
+.r{text-align:right;}.c{text-align:center;}
+.red{color:#B24A45;}.green{color:#1E7A47;}.muted{color:#6B7390;}.b{font-weight:700;}
+.sum{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-top:16px;}
+.totals{width:330px;border:1px solid #D9DDEB;border-radius:12px;overflow:hidden;margin-left:auto;}
+.totals .row{display:flex;justify-content:space-between;padding:7px 14px;font-size:13px;border-top:1px solid #E8EAF2;}
+.totals .row:first-child{border-top:none;}
+.totals .grand{background:#1F2F5C;color:#fff;font-weight:800;font-size:16px;padding:10px 14px;border-top:none;}
+.stamp{display:inline-block;border:2.5px solid;border-radius:10px;padding:4px 18px;font-weight:800;font-size:19px;letter-spacing:.5px;transform:rotate(-6deg);margin-top:8px;}
+.stamp.paid{color:#2F7A4F;border-color:#2F7A4F;}.stamp.due{color:#B24A45;border-color:#B24A45;}
+.note{margin-top:14px;padding:10px 14px;background:#FFF8E6;border:1px solid #F3E2B3;border-radius:10px;font-size:12.5px;color:#7A5A12;}
+.sign{display:flex;justify-content:space-between;margin-top:56px;font-size:12px;color:#6B7390;}
+.sign span{border-top:1.5px solid #AEB5CE;padding-top:5px;min-width:150px;text-align:center;}
+.foot{margin-top:22px;padding-top:10px;border-top:1px dashed #D9DDEB;text-align:center;font-size:11.5px;color:#6B7390;line-height:1.7;}
+.chart{margin-top:14px;border:1px solid #E3E7F3;border-radius:12px;padding:10px 12px 6px;background:#fff;}
+.chart .ttl{font-size:12px;font-weight:700;color:#1F2F5C;display:flex;justify-content:space-between;}
+.chart .lg span{display:inline-block;width:10px;height:10px;border-radius:3px;margin:0 4px 0 10px;vertical-align:middle;}
+.close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}
+@media print{body{padding:0;}.close-btn{display:none !important;}tr{page-break-inside:avoid;}}
+`;
+const docBand = (tagLabel, tagMain, tagSub) => {
+  const s = getShop();
+  return `<div class="band"><div class="brand">${s.logo ? `<img class="logo" src="${s.logo}" alt="" />` : ""}<div style="min-width:0"><h1>${esc(s.name)}</h1>${s.address ? `<p>${esc(s.address)}</p>` : ""}${s.phone ? `<p>ফোন: ${esc(s.phone)}</p>` : ""}</div></div><div class="tag"><div class="t">${esc(tagLabel)}</div><div class="n">${tagMain}</div>${tagSub ? `<div class="d">${tagSub}</div>` : ""}</div></div>`;
+};
+const docPage = (title, body) =>
+  `<html><head><title>${esc(title)}</title><meta charset="utf-8" />${DOC_FONT}<style>${DOC_CSS}</style></head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button><div class="sheet">${body}</div></body></html>`;
+const docFoot = () => {
+  const s = getShop();
+  return `<div class="foot">ধন্যবাদ — আবার আসবেন${s.phone ? `<br/>যোগাযোগ: ${esc(s.phone)}` : ""}${s.address ? ` · ${esc(s.address)}` : ""}</div>`;
+};
+const sizeText = (it) => {
+  const h = String(it.height || "").trim();
+  const w = String(it.weight || "").trim();
+  return h && w ? toBn(`${esc(h)} × ${esc(w)}`) : h || w ? toBn(esc(h || w)) : "—";
+};
+function openPrintHtml(html) {
+  const win = window.open("", "_blank");
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 600);
+}
+
+function memoHtml(memo) {
+  const c = memoCalc(memo);
+  const used = memo.items.filter(memoItemUsed);
+  const rows = used
+    .map(
+      (it, i) =>
+        `<tr><td class="c muted">${toBn(i + 1)}</td><td class="b">${esc(it.name)}</td><td class="c">${sizeText(it)}</td><td class="r">${toBn(esc(it.qty) || "1")}</td><td class="r">${bf(numOr0(it.price))}</td><td class="r b">${bf(grossTotal(it))}</td></tr>`
+    )
+    .join("");
+  const line = (label, value, cls) => `<div class="row${cls ? " " + cls : ""}"><span>${label}</span><span>${value}</span></div>`;
+  const paidUp = c.due <= 0;
+  const body = `
+    ${docBand("মেমো নং", toBn(memo.no), `${toBn(memo.d)} ${MONTH_NAMES[memo.m - 1]}, ${toBn(memo.y)}`)}
+    <div class="panel"><div><div class="k">প্রাপক</div><div class="v">${esc(memo.customer)}</div></div><div class="s" style="text-align:right">${memo.phone ? `ফোন: ${esc(memo.phone)}<br/>` : ""}${memo.address ? `ঠিকানা: ${esc(memo.address)}` : ""}</div></div>
+    ${rows ? `<table class="items"><thead><tr><th class="c" style="width:38px">নং</th><th>বিবরণ</th><th class="c">সাইজ</th><th class="r">পরিমান</th><th class="r">দাম</th><th class="r">মোট</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+    <div class="sum"><div>${c.total > 0 ? `<span class="stamp ${paidUp ? "paid" : "due"}">${paidUp ? "পরিশোধিত" : "বাকি ৳" + bf(c.due)}</span>` : ""}</div>
+      <div class="totals">
+        ${rows ? line("সাবটোটাল", bf(c.subtotal)) : ""}
+        ${c.discount > 0 ? line("ছাড় (−)", bf(c.discount)) : ""}
+        ${c.prevDue > 0 ? line("পূর্বের বাকি (+)", bf(c.prevDue)) : ""}
+        ${line("সর্বমোট", `<b>${bf(c.total)}</b>`)}
+        ${c.paid > 0 ? line("জমা (−)", `<span class="green b">${bf(c.paid)}</span>`) : ""}
+        ${line("বাকি", `৳ ${bf(c.due)}`, "grand")}
+      </div></div>
+    ${memo.note ? `<div class="note"><b>নোট:</b> ${esc(memo.note)}</div>` : ""}
+    <div class="sign"><span>গ্রাহকের স্বাক্ষর</span><span>কর্তৃপক্ষ</span></div>
+    ${docFoot()}`;
+  return docPage(`মেমো নং ${toBn(memo.no)} — ${memo.customer}`, body);
+}
+
+function statementHtml(c) {
+  const rows = customerRows(c);
+  const now = new Date();
+  const trs = rows
+    .map((r) => {
+      const main = `<tr><td class="muted" style="white-space:nowrap">${toBn(r.d)} ${MONTH_SHORT[r.m - 1]} ${toBn(r.y)}</td><td class="b">${esc(r.label)}</td><td class="r">${bf(r.total)}</td><td class="r green">${r.paid ? bf(r.paid) : "—"}</td><td class="r b ${r.due > 0 ? "red" : "muted"}">${bf(r.due)}</td></tr>`;
+      const sub = r.detail && r.detail.length ? `<tr><td class="sub" colspan="5">${r.detail.map((t) => `• ${esc(t)}`).join("<br/>")}</td></tr>` : "";
+      return `<tbody class="g">${main}${sub}</tbody>`;
+    })
+    .join("");
+  const body = `
+    ${docBand("হিসাবের বিবরণী", "", `${toBn(now.getDate())} ${MONTH_NAMES[now.getMonth()]}, ${toBn(now.getFullYear())}`)}
+    <div class="panel"><div><div class="k">কাস্টমার</div><div class="v">${esc(c.name)}</div></div><div class="s" style="text-align:right">${c.phone ? `ফোন: ${esc(c.phone)}<br/>` : ""}${c.address ? `ঠিকানা: ${esc(c.address)}` : ""}</div></div>
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi navy"><div class="k">মোট বিল (ছাড়সহ)</div><div class="v">৳ ${bf(c.billed)}</div></div>
+      <div class="kpi green"><div class="k">মোট জমা</div><div class="v">৳ ${bf(c.paid)}</div></div>
+      <div class="kpi ${c.due > 0 ? "red" : "green"}"><div class="k">বর্তমান বাকি</div><div class="v">৳ ${bf(c.due)}</div></div>
+    </div>
+    ${trs ? `<table class="items"><thead><tr><th>তারিখ</th><th>বিবরণ</th><th class="r">সর্বমোট</th><th class="r">জমা</th><th class="r">বাকি</th></tr></thead>${trs}</table>` : ""}
+    <div class="sign"><span>গ্রাহকের স্বাক্ষর</span><span>কর্তৃপক্ষ</span></div>
+    ${docFoot()}`;
+  return docPage(`হিসাবের বিবরণী — ${c.name}`, body);
+}
+
+function monthReportHtml(y, m, entries) {
+  const days = Object.keys(entries).map(Number).sort((a, b) => a - b);
+  const sum = (f) => days.reduce((s, d) => s + (f(entries[d]) || 0), 0);
+  const cash = sum((e) => e.itemsTotal);
+  const exp = sum((e) => e.expenseTotal);
+  const disc = sum((e) => e.discountTotalDay);
+  const dueNow = sum((e) => e.items.reduce((a, it) => a + dueRemaining(it), 0));
+  const sale = sum((e) => e.items.filter((it) => !String(it.name || "").endsWith("(পরিশোধ)")).reduce((a, it) => a + grossTotal(it) - numOr0(it.discount), 0));
+  const first = days.length ? entries[days[0]] : null;
+  const last = days.length ? entries[days[days.length - 1]] : null;
+  const wk = ["রবি", "সোম", "মঙ্গল", "বুধ", "বৃহঃ", "শুক্র", "শনি"];
+  const trs = days
+    .map((d) => {
+      const e = entries[d];
+      const w = wk[new Date(y, m - 1, d).getDay()];
+      const dueD = e.items.reduce((a, it) => a + dueRemaining(it), 0);
+      return `<tr><td class="b">${toBn(d)} <span class="muted" style="font-weight:400;font-size:11px">${w}</span></td><td class="r muted">${bf(e.opening)}</td><td class="r b">${bf(e.itemsTotal)}</td><td class="r ${dueD > 0 ? "red" : "muted"}">${dueD > 0 ? bf(dueD) : "—"}</td><td class="r muted">${e.discountTotalDay > 0 ? bf(e.discountTotalDay) : "—"}</td><td class="r ${e.expenseTotal > 0 ? "" : "muted"}" ${e.expenseTotal > 0 ? 'style="color:#B2661F"' : ""}>${e.expenseTotal > 0 ? bf(e.expenseTotal) : "—"}</td><td class="r b ${e.remaining < 0 ? "red" : ""}" style="color:${e.remaining < 0 ? "#B24A45" : "#1F2F5C"}">${bf(e.remaining)}</td></tr>`;
+    })
+    .join("");
+  // দৈনিক বিক্রি বনাম খরচের বার চার্ট (SVG)
+  const W = 780;
+  const H = 130;
+  const maxV = Math.max(1, ...days.map((d) => Math.max(entries[d].itemsTotal, entries[d].expenseTotal)));
+  const bw = days.length ? Math.min(22, (W - 20) / days.length / 2.4) : 10;
+  const step = days.length ? (W - 20) / days.length : 20;
+  const bars = days
+    .map((d, i) => {
+      const x = 10 + i * step;
+      const hs = Math.round((entries[d].itemsTotal / maxV) * (H - 28));
+      const he = Math.round((entries[d].expenseTotal / maxV) * (H - 28));
+      return `<rect x="${x.toFixed(1)}" y="${H - 18 - hs}" width="${bw.toFixed(1)}" height="${hs}" rx="2" fill="#2B4283"/><rect x="${(x + bw + 1).toFixed(1)}" y="${H - 18 - he}" width="${bw.toFixed(1)}" height="${he}" rx="2" fill="#E39A4F"/><text x="${(x + bw).toFixed(1)}" y="${H - 5}" font-size="9" text-anchor="middle" fill="#6B7390">${toBn(d)}</text>`;
+    })
+    .join("");
+  const body = `
+    ${docBand("মাসিক হিসাব", `${MONTH_NAMES[m - 1]}`, `${toBn(y)} · ${toBn(days.length)} দিনের এন্ট্রি`)}
+    <div class="kpis">
+      <div class="kpi navy"><div class="k">মোট বিক্রি</div><div class="v">৳ ${bf(sale)}</div></div>
+      <div class="kpi green"><div class="k">নগদ জমা (আয়)</div><div class="v">৳ ${bf(cash)}</div></div>
+      <div class="kpi orange"><div class="k">মোট খরচ</div><div class="v">৳ ${bf(exp)}</div></div>
+      <div class="kpi ${sale - exp >= 0 ? "green" : "red"}"><div class="k">আনুমানিক লাভ</div><div class="v">৳ ${bf(sale - exp)}</div></div>
+    </div>
+    <div class="kpis" style="margin-top:10px">
+      <div class="kpi"><div class="k">মাসের শুরুতে ইজা টাকা</div><div class="v" style="font-size:16px">৳ ${bf(first ? first.opening : 0)}</div></div>
+      <div class="kpi"><div class="k">মাসের শেষে অবশিষ্ট</div><div class="v" style="font-size:16px;color:#1F2F5C">৳ ${bf(last ? last.remaining : 0)}</div></div>
+      <div class="kpi red"><div class="k">এখনো বাকি</div><div class="v" style="font-size:16px">৳ ${bf(dueNow)}</div></div>
+      <div class="kpi"><div class="k">মোট ছাড়</div><div class="v" style="font-size:16px">৳ ${bf(disc)}</div></div>
+    </div>
+    ${days.length ? `<div class="chart"><div class="ttl"><span>দিন অনুযায়ী জমা ও খরচ</span><span class="lg"><span style="background:#2B4283"></span>জমা<span style="background:#E39A4F"></span>খরচ</span></div><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">${bars}</svg></div>` : ""}
+    <table class="items">
+      <thead><tr><th>তারিখ</th><th class="r">ইজা টাকা</th><th class="r">জমা (আয়)</th><th class="r">বাকি</th><th class="r">ছাড়</th><th class="r">খরচ</th><th class="r">অবশিষ্ট</th></tr></thead>
+      <tbody>${trs}</tbody>
+      <tfoot><tr><td>মোট</td><td></td><td class="r">${bf(cash)}</td><td class="r">${bf(dueNow)}</td><td class="r">${bf(disc)}</td><td class="r">${bf(exp)}</td><td class="r">${bf(last ? last.remaining : 0)}</td></tr></tfoot>
+    </table>
+    <div class="foot">প্রস্তুতের তারিখ: ${toBn(new Date().getDate())} ${MONTH_NAMES[new Date().getMonth()]} ${toBn(new Date().getFullYear())} · "বাকি" মানে ওই দিনের বিক্রির যে টাকা এখনো পাওয়া যায়নি</div>`;
+  return docPage(`${MONTH_NAMES[m - 1]} ${y} — মাসিক হিসাব`, body);
+}
+
 async function renderDocCanvases(doc) {
   const S = 2;
   const PW = 794;
@@ -1853,113 +2047,210 @@ async function renderDocCanvases(doc) {
     return lines;
   };
   const tw = PW - 2 * M;
+  const RED = "#B24A45";
+  const rr = (x, yy, w, h, r, fill, stroke, lw = 1) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, yy);
+    ctx.lineTo(x + w - r, yy);
+    ctx.arcTo(x + w, yy, x + w, yy + r, r);
+    ctx.lineTo(x + w, yy + h - r);
+    ctx.arcTo(x + w, yy + h, x + w - r, yy + h, r);
+    ctx.lineTo(x + r, yy + h);
+    ctx.arcTo(x, yy + h, x, yy + h - r, r);
+    ctx.lineTo(x, yy + r);
+    ctx.arcTo(x, yy, x + r, yy, r);
+    ctx.closePath();
+    if (fill) {
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lw;
+      ctx.stroke();
+    }
+  };
+  const TONE = {
+    navy: ["#E8EBF5", "#D3D9EE", "#1F2F5C"],
+    green: ["#E3F4EA", "#C7E6D3", "#1E7A47"],
+    red: ["#FBEAE7", "#F0CBC6", "#B24A45"],
+    orange: ["#FFF3E3", "#F4DDBB", "#B2661F"],
+    gray: ["#F5F6FA", "#E3E7F3", "#1B2340"],
+  };
   const drawHead = () => {
     if (!doc.table) return;
-    ctx.fillStyle = NAVY;
-    ctx.fillRect(M, y, tw, 28);
+    rr(M, y, tw, 28, 7, NAVY);
     let x = M;
     doc.table.cols.forEach((c) => {
       const w = c.w * tw;
       const tx = c.align === "right" ? x + w - 8 : c.align === "center" ? x + w / 2 : x + 8;
-      text(c.label, tx, y + 19, { size: 13, bold: true, color: "#ffffff", align: c.align || "left", maxW: w - 16 });
+      text(c.label, tx, y + 19, { size: 12.5, bold: true, color: "#ffffff", align: c.align || "left", maxW: w - 16 });
       x += w;
     });
-    y += 28;
+    y += 30;
   };
   const ensure = (h, withHead) => {
-    if (y + h > PH - M - 30) {
+    if (y + h > PH - M - 34) {
       newPage();
       if (withHead) drawHead();
     }
   };
 
   newPage();
-  // মাথার অংশ
-  let logoW = 0;
+  // মাথার ব্যান্ড: লোগো + দোকানের নাম + ডকুমেন্টের ট্যাগ
+  const bandH = 92;
+  rr(M, y, tw, bandH, 14, NAVY);
+  let bx = M + 18;
   if (logoImg) {
-    const h = 60;
-    logoW = Math.min(120, (logoImg.width * h) / logoImg.height);
-    ctx.drawImage(logoImg, M, y, logoW, h);
+    rr(bx, y + 16, 64, 60, 10, "#ffffff");
+    const lw = Math.min(56, (logoImg.width * 52) / logoImg.height);
+    ctx.drawImage(logoImg, bx + (64 - lw) / 2, y + 20, lw, 52);
+    bx += 78;
   }
-  const hw = PW - 2 * M - 2 * (logoW ? logoW + 10 : 0);
-  text(shop.name, PW / 2, y + 24, { size: 22, bold: true, color: NAVY, align: "center", maxW: hw });
-  if (shop.address) text(shop.address, PW / 2, y + 46, { size: 12.5, color: GRAY, align: "center", maxW: hw });
-  if (shop.phone) text(`ফোন: ${shop.phone}`, PW / 2, y + 64, { size: 12.5, color: GRAY, align: "center", maxW: hw });
-  y += 76;
-  hline(y, NAVY, 2);
-  y += 22;
+  const tagW = 190;
+  const nameW = PW - M - 18 - tagW - bx;
+  text(shop.name, bx, y + 36, { size: 20, bold: true, color: "#ffffff", maxW: nameW });
+  if (shop.address) text(shop.address, bx, y + 56, { size: 11.5, color: "#D5DBF0", maxW: nameW });
+  if (shop.phone) text(`ফোন: ${shop.phone}`, bx, y + 74, { size: 11.5, color: "#D5DBF0", maxW: nameW });
+  const tx0 = PW - M - 18;
+  if (doc.tagMain) {
+    if (doc.tagLabel) text(doc.tagLabel, tx0, y + 30, { size: 11.5, color: "#D5DBF0", align: "right" });
+    text(doc.tagMain, tx0, y + 58, { size: 26, bold: true, color: "#ffffff", align: "right", maxW: tagW });
+    if (doc.tagSub) text(doc.tagSub, tx0, y + 78, { size: 12, color: "#D5DBF0", align: "right", maxW: tagW });
+  } else {
+    if (doc.tagLabel) text(doc.tagLabel, tx0, y + 46, { size: 17, bold: true, color: "#ffffff", align: "right", maxW: tagW });
+    if (doc.tagSub) text(doc.tagSub, tx0, y + 68, { size: 12, color: "#D5DBF0", align: "right", maxW: tagW });
+  }
+  y += bandH + 16;
 
-  if (doc.metaLeft) text(doc.metaLeft, M, y, { size: 14 });
-  if (doc.metaRight) text(doc.metaRight, PW - M, y, { size: 14, align: "right" });
-  y += 26;
-  (doc.customerLines || []).forEach((ln, i) => {
-    text(ln, M, y, { size: i === 0 ? 17 : 13.5, bold: i === 0, color: i === 0 ? INK : GRAY, maxW: tw });
-    y += i === 0 ? 24 : 21;
-  });
-  y += 10;
+  // পক্ষের প্যানেল
+  const lines = doc.customerLines || [];
+  if (lines.length) {
+    const ph = 62;
+    rr(M, y, tw, ph, 10, "#F5F6FA", "#E3E7F3");
+    text(doc.partyLabel || "কাস্টমার", M + 16, y + 20, { size: 11, color: GRAY });
+    text(lines[0], M + 16, y + 45, { size: 18, bold: true, maxW: tw * 0.55 });
+    lines.slice(1, 3).forEach((ln, i) => text(ln, PW - M - 16, y + 26 + i * 20, { size: 12.5, color: "#4A5272", align: "right", maxW: tw * 0.4 }));
+    y += ph + 14;
+  }
+  // সারাংশ-কার্ড
+  if (doc.kpis && doc.kpis.length) {
+    const n = doc.kpis.length;
+    const gap = 10;
+    const kw = (tw - gap * (n - 1)) / n;
+    doc.kpis.forEach((k, i) => {
+      const t = TONE[k.tone] || TONE.gray;
+      const x = M + i * (kw + gap);
+      rr(x, y, kw, 56, 10, t[0], t[1]);
+      text(k.label, x + 12, y + 20, { size: 11, color: GRAY, maxW: kw - 24 });
+      text(k.value, x + 12, y + 44, { size: 18, bold: true, color: t[2], maxW: kw - 24 });
+    });
+    y += 70;
+  }
 
   if (doc.table) {
     drawHead();
-    doc.table.rows.forEach((r) => {
-      ensure(30, true);
+    doc.table.rows.forEach((r, ri) => {
+      const subs = (doc.table.subs && doc.table.subs[ri]) || [];
+      const subLines = [];
+      subs.forEach((sline) => wrapLines("• " + sline, tw - 28, 11.5).forEach((ln) => subLines.push(ln)));
+      const rowH = 28 + (subLines.length ? subLines.length * 16 + 5 : 0);
+      ensure(rowH + 2, true);
+      if (ri % 2 === 1) {
+        ctx.fillStyle = "#F8F9FC";
+        ctx.fillRect(M, y, tw, rowH);
+      }
       let x = M;
       doc.table.cols.forEach((c, i) => {
         const w = c.w * tw;
         const tx = c.align === "right" ? x + w - 8 : c.align === "center" ? x + w / 2 : x + 8;
-        text(r[i], tx, y + 19, { size: 13.5, align: c.align || "left", maxW: w - 16 });
+        text(r[i], tx, y + 19, { size: 13, bold: !!c.bold, color: c.color === "red" ? RED : c.color === "green" ? "#1E7A47" : c.color === "gray" ? GRAY : INK, align: c.align || "left", maxW: w - 16 });
         x += w;
       });
-      y += 28;
-      hline(y, LINE, 1);
+      subLines.forEach((ln, k) => text(ln, M + 14, y + 38 + k * 16, { size: 11.5, color: GRAY, maxW: tw - 28 }));
+      y += rowH;
+      hline(y, "#E8EAF2", 1);
     });
   }
 
   if (doc.summary && doc.summary.length) {
-    y += 14;
-    ensure(doc.summary.length * 28 + 20, false);
-    const bx = PW - M - 320;
-    doc.summary.forEach((row) => {
-      const label = row[0];
-      const value = row[1];
+    y += 16;
+    const hs = doc.summary.map((row) => (row[2] ? 42 : 29));
+    const boxH = hs.reduce((a, b) => a + b, 0);
+    ensure(boxH + 24, false);
+    const bw = 330;
+    const bx2 = PW - M - bw;
+    if (doc.stamp) {
+      const sc = doc.stamp.tone === "green" ? "#2F7A4F" : RED;
+      ctx.save();
+      ctx.translate(M + 100, y + boxH / 2);
+      ctx.rotate(-0.1);
+      setFont(21, true);
+      const sw = ctx.measureText(doc.stamp.text).width;
+      rr(-sw / 2 - 18, -24, sw + 36, 48, 10, null, sc, 2.5);
+      text(doc.stamp.text, 0, 8, { size: 21, bold: true, color: sc, align: "center" });
+      ctx.restore();
+    }
+    rr(bx2, y, bw, boxH, 10, "#ffffff", "#D9DDEB");
+    let yy = y;
+    doc.summary.forEach((row, ri) => {
       const strong = !!row[2];
+      const h = hs[ri];
       if (strong) {
-        ctx.strokeStyle = NAVY;
-        ctx.lineWidth = 2;
+        rr(bx2, yy, bw, h, 10, NAVY);
+        ctx.fillStyle = NAVY;
+        ctx.fillRect(bx2, yy, bw, 12);
+      } else if (ri > 0) {
+        ctx.strokeStyle = "#E8EAF2";
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(bx, y);
-        ctx.lineTo(PW - M, y);
+        ctx.moveTo(bx2 + 1, yy);
+        ctx.lineTo(bx2 + bw - 1, yy);
         ctx.stroke();
-        y += 6;
       }
-      text(label, bx + 4, y + 18, { size: strong ? 17 : 14, bold: strong, color: strong ? NAVY : INK });
-      text(value, PW - M - 4, y + 18, { size: strong ? 17 : 14, bold: strong, color: strong ? NAVY : INK, align: "right" });
-      y += strong ? 30 : 25;
+      text(row[0], bx2 + 14, yy + (strong ? 27 : 19), { size: strong ? 16 : 13.5, bold: strong, color: strong ? "#ffffff" : INK });
+      text(row[1], bx2 + bw - 14, yy + (strong ? 27 : 19), { size: strong ? 17 : 13.5, bold: strong, color: strong ? "#ffffff" : INK, align: "right" });
+      yy += h;
     });
+    y += boxH + 8;
   }
 
   if (doc.note) {
-    y += 12;
-    wrapLines(doc.note, tw, 13).forEach((ln) => {
-      ensure(22, false);
-      text(ln, M, y + 14, { size: 13, color: GRAY });
-      y += 21;
-    });
+    const nl = wrapLines(doc.note, tw - 28, 12.5);
+    const nh = nl.length * 19 + 16;
+    ensure(nh + 20, false);
+    y += 10;
+    rr(M, y, tw, nh, 10, "#FFF8E6", "#F3E2B3");
+    nl.forEach((ln, k) => text(ln, M + 14, y + 22 + k * 19, { size: 12.5, color: "#7A5A12" }));
+    y += nh + 4;
   }
 
-  ensure(90, false);
-  const sy = Math.max(y + 56, PH - M - 30);
+  ensure(80, false);
+  const sy = Math.max(y + 54, PH - M - 78);
   const labels = doc.signLabels || ["গ্রাহকের স্বাক্ষর", "কর্তৃপক্ষ"];
   [
     [M, M + 160],
     [PW - M - 160, PW - M],
   ].forEach((seg, i) => {
-    ctx.strokeStyle = GRAY;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#AEB5CE";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(seg[0], sy);
     ctx.lineTo(seg[1], sy);
     ctx.stroke();
     text(labels[i], (seg[0] + seg[1]) / 2, sy + 18, { size: 12, color: GRAY, align: "center" });
+  });
+  // প্রতিটা পাতার নিচে: ধন্যবাদ + পাতা নম্বর
+  pages.forEach((pg, i) => {
+    ctx = pg.getContext("2d");
+    ctx.strokeStyle = "#D9DDEB";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(M, PH - 36);
+    ctx.lineTo(PW - M, PH - 36);
+    ctx.stroke();
+    text(`ধন্যবাদ — আবার আসবেন${shop.phone ? ` · ${shop.phone}` : ""}`, PW / 2, PH - 18, { size: 11.5, color: GRAY, align: "center", maxW: tw - 120 });
+    if (pages.length > 1) text(`পাতা ${toBn(i + 1)}/${toBn(pages.length)}`, PW - M, PH - 18, { size: 11, color: GRAY, align: "right" });
   });
   return pages;
 }
@@ -2050,31 +2341,38 @@ function memoToDoc(memo) {
   const c = memoCalc(memo);
   const used = memo.items.filter(memoItemUsed);
   const summary = [];
-  if (used.length) summary.push(["সাবটোটাল", fmt(c.subtotal)]);
-  if (c.discount > 0) summary.push(["ছাড় (-)", fmt(c.discount)]);
-  if (c.prevDue > 0) summary.push(["পূর্বের বাকি (+)", fmt(c.prevDue)]);
-  summary.push(["সর্বমোট", fmt(c.total)]);
-  if (c.paid > 0) summary.push(["জমা (-)", fmt(c.paid)]);
-  summary.push(["বাকি", fmt(c.due), true]);
+  if (used.length) summary.push(["সাবটোটাল", bf(c.subtotal)]);
+  if (c.discount > 0) summary.push(["ছাড় (−)", bf(c.discount)]);
+  if (c.prevDue > 0) summary.push(["পূর্বের বাকি (+)", bf(c.prevDue)]);
+  summary.push(["সর্বমোট", bf(c.total)]);
+  if (c.paid > 0) summary.push(["জমা (−)", bf(c.paid)]);
+  summary.push(["বাকি", `৳ ${bf(c.due)}`, true]);
+  const sizeOf = (it) => {
+    const h = String(it.height || "").trim();
+    const w = String(it.weight || "").trim();
+    return h && w ? toBn(`${h} × ${w}`) : h || w ? toBn(h || w) : "—";
+  };
   return {
-    metaLeft: `মেমো নং: ${toBn(memo.no)}`,
-    metaRight: `তারিখ: ${toBn(memo.d)} ${MONTH_NAMES[memo.m - 1]}, ${toBn(memo.y)}`,
+    tagLabel: "মেমো নং",
+    tagMain: toBn(memo.no),
+    tagSub: `${toBn(memo.d)} ${MONTH_NAMES[memo.m - 1]}, ${toBn(memo.y)}`,
+    partyLabel: "প্রাপক",
     customerLines: [memo.customer, memo.phone ? `ফোন: ${memo.phone}` : "", memo.address ? `ঠিকানা: ${memo.address}` : ""].filter(Boolean),
     table: used.length
       ? {
           cols: [
-            { label: "নং", w: 0.07, align: "center" },
-            { label: "বিবরণ", w: 0.33 },
-            { label: "হাইট", w: 0.1, align: "right" },
-            { label: "ওয়েট", w: 0.1, align: "right" },
+            { label: "নং", w: 0.07, align: "center", color: "gray" },
+            { label: "বিবরণ", w: 0.37, bold: true },
+            { label: "সাইজ", w: 0.15, align: "center" },
             { label: "পরিমান", w: 0.1, align: "right" },
-            { label: "দাম", w: 0.13, align: "right" },
-            { label: "মোট", w: 0.17, align: "right" },
+            { label: "দাম", w: 0.14, align: "right" },
+            { label: "মোট", w: 0.17, align: "right", bold: true },
           ],
-          rows: used.map((it, i) => [toBn(i + 1), it.name, it.height || "—", it.weight || "—", it.qty || "১", fmt(numOr0(it.price)), fmt(grossTotal(it))]),
+          rows: used.map((it, i) => [toBn(i + 1), it.name, sizeOf(it), toBn(it.qty || "1"), bf(numOr0(it.price)), bf(grossTotal(it))]),
         }
       : null,
     summary,
+    stamp: c.total > 0 ? (c.due <= 0 ? { text: "পরিশোধিত", tone: "green" } : { text: `বাকি ৳${bf(c.due)}`, tone: "red" }) : null,
     note: memo.note ? `নোট: ${memo.note}` : "",
   };
 }
@@ -2083,156 +2381,40 @@ function statementToDoc(c) {
   const rows = customerRows(c);
   const now = new Date();
   return {
-    metaLeft: "হিসাবের বিবরণী",
-    metaRight: `তারিখ: ${toBn(now.getDate())} ${MONTH_NAMES[now.getMonth()]}, ${toBn(now.getFullYear())}`,
+    tagLabel: "হিসাবের বিবরণী",
+    tagSub: `${toBn(now.getDate())} ${MONTH_NAMES[now.getMonth()]}, ${toBn(now.getFullYear())}`,
+    partyLabel: "কাস্টমার",
     customerLines: [c.name, c.phone ? `ফোন: ${c.phone}` : "", c.address ? `ঠিকানা: ${c.address}` : ""].filter(Boolean),
+    kpis: [
+      { label: "মোট বিল (ছাড়সহ)", value: `৳ ${bf(c.billed)}`, tone: "navy" },
+      { label: "মোট জমা", value: `৳ ${bf(c.paid)}`, tone: "green" },
+      { label: "বর্তমান বাকি", value: `৳ ${bf(c.due)}`, tone: c.due > 0 ? "red" : "green" },
+    ],
     table: rows.length
       ? {
           cols: [
-            { label: "তারিখ", w: 0.2 },
-            { label: "বিবরণ", w: 0.28 },
+            { label: "তারিখ", w: 0.2, color: "gray" },
+            { label: "বিবরণ", w: 0.28, bold: true },
             { label: "সর্বমোট", w: 0.17, align: "right" },
-            { label: "জমা", w: 0.17, align: "right" },
-            { label: "বাকি", w: 0.18, align: "right" },
+            { label: "জমা", w: 0.17, align: "right", color: "green" },
+            { label: "বাকি", w: 0.18, align: "right", bold: true, color: "red" },
           ],
-          rows: rows.map((r) => [`${toBn(r.d)} ${MONTH_NAMES[r.m - 1].slice(0, 3)} ${toBn(r.y)}`, r.label, fmt(r.total), r.paid ? fmt(r.paid) : "—", fmt(r.due)]),
+          rows: rows.map((r) => [`${toBn(r.d)} ${MONTH_SHORT[r.m - 1]} ${toBn(r.y)}`, r.label, bf(r.total), r.paid ? bf(r.paid) : "—", bf(r.due)]),
+          subs: rows.map((r) => r.detail || []),
         }
       : null,
-    summary: [
-      ["মোট বিল (ছাড়সহ)", fmt(c.billed)],
-      ["মোট জমা", fmt(c.paid)],
-      ["বর্তমান বাকি", fmt(c.due), true],
-    ],
+    summary: [],
     note: "",
     signLabels: ["গ্রাহকের স্বাক্ষর", "কর্তৃপক্ষ"],
   };
 }
 
 function printCustomerStatement(c) {
-  const win = window.open("", "_blank");
-  if (!win) return;
-  const rows = customerRows(c)
-    .map(
-      (r) =>
-        `<tr><td>${toBn(r.d)} ${MONTH_NAMES[r.m - 1].slice(0, 3)} ${toBn(r.y)}</td><td>${esc(r.label)}</td><td style="text-align:right">${fmt(r.total)}</td><td style="text-align:right">${
-          r.paid ? fmt(r.paid) : "—"
-        }</td><td style="text-align:right">${fmt(r.due)}</td></tr>`
-    )
-    .join("");
-  const now = new Date();
-  win.document.write(`
-    <html><head><title>হিসাবের বিবরণী — ${esc(c.name)}</title>
-    <meta charset="utf-8" />
-    <style>
-      body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#1B2340;}
-      ${LETTERHEAD_CSS}
-      .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;}
-      .cust{font-size:13.5px;margin-bottom:14px;line-height:1.6;}
-      table{width:100%;border-collapse:collapse;}
-      th,td{border:1px solid #D9DDEB;padding:5px 8px;font-size:12.5px;}
-      th{background:#1F2F5C;color:#fff;text-align:left;}
-      .summary{width:300px;margin-left:auto;margin-top:16px;}
-      .summary td{border:none;padding:3px 4px;font-size:13px;}
-      .summary tr.total td{border-top:2px solid #1F2F5C;font-weight:bold;font-size:15px;color:#1F2F5C;}
-      .sign{display:flex;justify-content:space-between;margin-top:56px;font-size:12px;color:#6B7390;}
-      .sign span{border-top:1px solid #6B7390;padding-top:4px;min-width:130px;text-align:center;}
-      @media print{ body{padding:10mm;} }
-      .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}
-    </style>
-    </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
-      ${shopLetterheadHtml()}
-      <div class="meta"><span>হিসাবের বিবরণী</span><span>তারিখ: ${toBn(now.getDate())} ${MONTH_NAMES[now.getMonth()]}, ${toBn(now.getFullYear())}</span></div>
-      <div class="cust"><b>${esc(c.name)}</b>${c.phone ? `<br/>ফোন: ${esc(c.phone)}` : ""}${c.address ? `<br/>ঠিকানা: ${esc(c.address)}` : ""}</div>
-      ${
-        rows
-          ? `<table><thead><tr><th>তারিখ</th><th>বিবরণ</th><th>সর্বমোট</th><th>জমা</th><th>বাকি</th></tr></thead><tbody>${rows}</tbody></table>`
-          : ""
-      }
-      <table class="summary">
-        <tr><td>মোট বিল (ছাড়সহ)</td><td style="text-align:right">${fmt(c.billed)}</td></tr>
-        <tr><td>মোট জমা</td><td style="text-align:right">${fmt(c.paid)}</td></tr>
-        <tr class="total"><td>বর্তমান বাকি</td><td style="text-align:right">${fmt(c.due)}</td></tr>
-      </table>
-      <div class="sign"><span>গ্রাহকের স্বাক্ষর</span><span>কর্তৃপক্ষ</span></div>
-    </body></html>
-  `);
-  win.document.close();
-  win.focus();
-  setTimeout(() => win.print(), 300);
+  openPrintHtml(statementHtml(c));
 }
 
 function printCustomerMemo(memo) {
-  const win = window.open("", "_blank");
-  if (!win) return;
-  const c = memoCalc(memo);
-  const rows = memo.items
-    .filter(memoItemUsed)
-    .map(
-      (it, i) => `<tr>
-        <td style="text-align:center">${toBn(i + 1)}</td>
-        <td>${esc(it.name)}</td>
-        <td style="text-align:right">${esc(it.height) || "—"}</td>
-        <td style="text-align:right">${esc(it.weight) || "—"}</td>
-        <td style="text-align:right">${esc(it.qty) || "১"}</td>
-        <td style="text-align:right">${fmt(numOr0(it.price))}</td>
-        <td style="text-align:right">${fmt(grossTotal(it))}</td>
-      </tr>`
-    )
-    .join("");
-  const line = (label, value, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td>${label}</td><td style="text-align:right">${value}</td></tr>`;
-  win.document.write(`
-    <html><head><title>মেমো নং ${toBn(memo.no)} — ${esc(memo.customer)}</title>
-    <meta charset="utf-8" />
-    <style>
-      body{font-family:'Noto Sans Bengali',sans-serif;padding:28px;color:#1B2340;}
-      ${LETTERHEAD_CSS}
-      .meta{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;}
-      .cust{font-size:13.5px;margin-bottom:14px;line-height:1.6;}
-      table{width:100%;border-collapse:collapse;}
-      th,td{border:1px solid #D9DDEB;padding:5px 8px;font-size:12.5px;}
-      th{background:#1F2F5C;color:#fff;text-align:left;}
-      .summary{width:300px;margin-left:auto;margin-top:16px;}
-      .summary td{border:none;padding:3px 4px;font-size:13px;}
-      .summary tr.total td{border-top:2px solid #1F2F5C;font-weight:bold;font-size:15px;color:#1F2F5C;}
-      .note{margin-top:14px;font-size:12.5px;color:#6B7390;}
-      .sign{display:flex;justify-content:space-between;margin-top:56px;font-size:12px;color:#6B7390;}
-      .sign span{border-top:1px solid #6B7390;padding-top:4px;min-width:130px;text-align:center;}
-      @media print{ body{padding:10mm;} }
-    .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}</style>
-    </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
-      ${shopLetterheadHtml()}
-      <div class="meta">
-        <span>মেমো নং: ${toBn(memo.no)}</span>
-        <span>তারিখ: ${toBn(memo.d)} ${MONTH_NAMES[memo.m - 1]}, ${toBn(memo.y)}</span>
-      </div>
-      <div class="cust">
-        <b>${esc(memo.customer)}</b>
-        ${memo.phone ? `<br/>ফোন: ${esc(memo.phone)}` : ""}
-        ${memo.address ? `<br/>ঠিকানা: ${esc(memo.address)}` : ""}
-      </div>
-      ${
-        rows
-          ? `<table>
-        <thead><tr><th style="width:36px">নং</th><th>বিবরণ</th><th>হাইট</th><th>ওয়েট</th><th>পরিমান</th><th>দাম</th><th>মোট</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`
-          : ""
-      }
-      <table class="summary">
-        ${rows ? line("সাবটোটাল", fmt(c.subtotal)) : ""}
-        ${c.discount > 0 ? line("ছাড় (-)", fmt(c.discount)) : ""}
-        ${c.prevDue > 0 ? line("পূর্বের বাকি (+)", fmt(c.prevDue)) : ""}
-        ${line("সর্বমোট", fmt(c.total))}
-        ${c.paid > 0 ? line("জমা (-)", fmt(c.paid)) : ""}
-        ${line("বাকি", fmt(c.due), "total")}
-      </table>
-      ${memo.note ? `<p class="note">নোট: ${esc(memo.note)}</p>` : ""}
-      <div class="sign"><span>গ্রাহকের স্বাক্ষর</span><span>কর্তৃপক্ষ</span></div>
-    </body></html>
-  `);
-  win.document.close();
-  win.focus();
-  setTimeout(() => win.print(), 300);
+  openPrintHtml(memoHtml(memo));
 }
 
 // ---------- small UI atoms ----------
@@ -2511,28 +2693,16 @@ const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeh
 const HeaderBar = ({ title, onBack, editMode, onToggleMode, menuItems }) => (
   <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{ background: "var(--navy-bg)", color: "var(--on-navy)" }}>
     {menuItems && <HamburgerMenu items={menuItems} />}
-    {onBack &&
-      createPortal(
-        <button
-          onClick={onBack}
-          aria-label="পিছনে যান"
-          className="rk-zoomable fixed flex items-center justify-center active:opacity-80"
-          style={{
-            zIndex: 55,
-            left: 14,
-            bottom: 20,
-            width: 52,
-            height: 52,
-            borderRadius: 999,
-            background: "var(--navy-bg)",
-            color: "#FFFFFF",
-            boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
-          }}
-        >
-          <ChevronLeft size={26} strokeWidth={2.4} />
-        </button>,
-        document.body
-      )}
+    {onBack && (
+      <button
+        onClick={onBack}
+        aria-label="পিছনে যান"
+        className="flex items-center justify-center shrink-0 active:opacity-70"
+        style={{ width: 42, height: 42, borderRadius: 999, background: "rgba(255,255,255,0.22)", color: "#FFFFFF", boxShadow: "0 2px 10px rgba(0,0,0,0.28)", marginLeft: -4 }}
+      >
+        <ChevronLeft size={26} strokeWidth={2.6} />
+      </button>
+    )}
     <BookOpen size={18} style={{ opacity: 0.85 }} />
     <h1 className="flex-1" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 19 }}>{title}</h1>
     <ThemeButton />
@@ -3878,49 +4048,7 @@ export default function LedgerApp() {
   }
 
   const printMonthReport = (y, m, entries) => {
-    const win = window.open("", "_blank");
-    if (!win) return;
-    const days = Object.keys(entries)
-      .map(Number)
-      .sort((a, b) => a - b);
-    const rows = days
-      .map((d) => {
-        const e = entries[d];
-        return `<tr><td>${toBn(d)}</td><td style="text-align:right">${fmt(e.itemsTotal)}</td><td style="text-align:right">${fmt(
-          e.expenseTotal
-        )}</td><td style="text-align:right">${fmt(e.remaining)}</td></tr>`;
-      })
-      .join("");
-    const totalIncome = days.reduce((s, d) => s + entries[d].itemsTotal, 0);
-    const totalExpense = days.reduce((s, d) => s + entries[d].expenseTotal, 0);
-    win.document.write(`
-      <html><head><title>${MONTH_NAMES[m - 1]} ${y} - R.K Advertising</title>
-      <meta charset="utf-8" />
-      <style>
-        body{font-family:'Noto Sans Bengali',sans-serif;padding:24px;color:#1B2340;}
-        h1{color:#1F2F5C;font-size:18px;margin-bottom:2px;}
-        p.sub{color:#6B7390;font-size:12px;margin-top:0;}
-        table{width:100%;border-collapse:collapse;margin-top:14px;}
-        th,td{border:1px solid #D9DDEB;padding:6px 10px;font-size:13px;}
-        th{background:#1F2F5C;color:#fff;text-align:left;}
-        tfoot td{font-weight:bold;background:#E8EBF5;}
-        ${LETTERHEAD_CSS}
-      .close-btn{position:fixed;top:10px;right:10px;width:42px;height:42px;border-radius:50%;border:none;background:#1F2F5C;color:#fff;font-size:22px;line-height:1;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.3);}@media print{.close-btn{display:none !important;}}</style>
-      </head><body><button class="close-btn" onclick="window.close()" aria-label="বন্ধ করুন">✕</button>
-      ${shopLetterheadHtml()}
-      <p class="sub">মাসিক রিপোর্ট — ${MONTH_NAMES[m - 1]}, ${toBn(y)}</p>
-      <table>
-        <thead><tr><th>তারিখ</th><th>আয়</th><th>খরচ</th><th>অবশিষ্ট</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr><td>মোট</td><td>${fmt(totalIncome)}</td><td>${fmt(totalExpense)}</td><td>${fmt(
-      totalIncome - totalExpense
-    )}</td></tr></tfoot>
-      </table>
-      </body></html>
-    `);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 300);
+    openPrintHtml(monthReportHtml(y, m, entries));
   };
 
   const resetDraft = (y, m) => {
@@ -5670,7 +5798,7 @@ export default function LedgerApp() {
                               </div>
                               <div className="flex items-center justify-between mt-1" style={{ fontSize: 11, color: "var(--gray)" }}>
                                 <span>
-                                  নং {toBn(mm.no)} · {toBn(mm.d)} {MONTH_NAMES[mm.m - 1].slice(0, 3)} {toBn(mm.y)}
+                                  নং {toBn(mm.no)} · {toBn(mm.d)} {MONTH_SHORT[mm.m - 1]} {toBn(mm.y)}
                                   {mm.phone ? ` · ${mm.phone}` : ""}
                                 </span>
                                 {c.due > 0 ? (
@@ -5762,7 +5890,7 @@ export default function LedgerApp() {
                           style={{ borderTop: "1px solid var(--line2)", background: "var(--card)", cursor: "pointer" }}
                         >
                           <div className="px-2 py-1.5" style={{ fontSize: 11, color: "var(--gray)" }}>
-                            {toBn(r.d)} {MONTH_NAMES[r.m - 1].slice(0, 3)} {toBn(r.y)}
+                            {toBn(r.d)} {MONTH_SHORT[r.m - 1]} {toBn(r.y)}
                           </div>
                           <div className="px-2 py-1.5 truncate" style={{ fontSize: 12.5, color: "var(--ink)" }}>
                             {r.name}
@@ -5805,7 +5933,7 @@ export default function LedgerApp() {
                           </div>
                           <div className="flex items-center justify-between mt-1" style={{ fontSize: 11, color: "var(--gray)" }}>
                             <span>
-                              {toBn(g.count)} টা এন্ট্রি · সর্বশেষ {toBn(g.last.d)} {MONTH_NAMES[g.last.m - 1].slice(0, 3)} {toBn(g.last.y)}
+                              {toBn(g.count)} টা এন্ট্রি · সর্বশেষ {toBn(g.last.d)} {MONTH_SHORT[g.last.m - 1]} {toBn(g.last.y)}
                             </span>
                             {g.due > 0 && <span style={{ color: "var(--red)", fontWeight: 600 }}>বাকি {fmt(g.due)}</span>}
                           </div>
@@ -6248,7 +6376,7 @@ export default function LedgerApp() {
                               {myAdv.slice(0, 8).map((a) => (
                                 <div key={a.id} className="flex items-center justify-between py-1" style={{ borderTop: "1px solid var(--line2)", fontSize: 12.5 }}>
                                   <span style={{ color: "var(--ink)" }}>
-                                    {parseYmd(a.date) ? `${toBn(parseYmd(a.date).dd)} ${MONTH_NAMES[parseYmd(a.date).mm - 1].slice(0, 3)}` : a.date} · ৳{toBn(fmt(a.amount))}
+                                    {parseYmd(a.date) ? `${toBn(parseYmd(a.date).dd)} ${MONTH_SHORT[parseYmd(a.date).mm - 1]}` : a.date} · ৳{toBn(fmt(a.amount))}
                                     {a.note ? ` · ${a.note}` : ""}
                                   </span>
                                   <span className="flex items-center gap-2">
@@ -6668,7 +6796,7 @@ export default function LedgerApp() {
                                   style={{ borderTop: "1px solid var(--line2)", background: "var(--card)", cursor: r.kind === "memo" ? "pointer" : "default" }}
                                 >
                                   <div className="px-1 py-1.5" style={{ fontSize: 10.5, color: GRAY }}>
-                                    {toBn(r.d)} {MONTH_NAMES[r.m - 1].slice(0, 3)} {toBn(r.y)}
+                                    {toBn(r.d)} {MONTH_SHORT[r.m - 1]} {toBn(r.y)}
                                   </div>
                                   <div className="px-2 py-1.5 truncate" style={{ fontSize: 12, color: "var(--ink)" }}>
                                     {r.label}
@@ -6813,7 +6941,7 @@ export default function LedgerApp() {
                         </div>
                         <div style={{ fontSize: 11, color: "var(--gray)", marginTop: 3 }}>
                           মোছা হয়েছে {toBn(when.getDate())} {MONTH_NAMES[when.getMonth()]}
-                          {t.y ? ` · হিসাবের তারিখ ${toBn(t.d)} ${MONTH_NAMES[t.m - 1].slice(0, 3)} ${toBn(t.y)}` : ""}
+                          {t.y ? ` · হিসাবের তারিখ ${toBn(t.d)} ${MONTH_SHORT[t.m - 1]} ${toBn(t.y)}` : ""}
                         </div>
                         {editMode && (
                           <div className="flex gap-2 mt-2">
