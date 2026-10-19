@@ -86,6 +86,7 @@ html,body{background:var(--outer);}
 @media (min-width:1024px){:root{--rk-z:1.35;}}
 @media (min-width:1440px){:root{--rk-z:1.55;}}
 .rk-zoomable{zoom:var(--rk-z);}
+@media (max-width:639px){.rk-hdr-pad{padding-left:68px !important;}}
 .rk-sheet-card{zoom:var(--rk-z);max-height:calc(94vh / var(--rk-z));}
 `;
 function applyTheme(dark) {
@@ -2691,18 +2692,31 @@ const NameInput = ({ value, onValue, names, customNames, onAdd, onRemove, placeh
 };
 
 const HeaderBar = ({ title, onBack, editMode, onToggleMode, menuItems }) => (
-  <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{ background: "var(--navy-bg)", color: "var(--on-navy)" }}>
+  <div className={`flex items-center gap-3 px-4 py-4 sticky top-0 z-10${onBack ? " rk-hdr-pad" : ""}`} style={{ background: "var(--navy-bg)", color: "var(--on-navy)" }}>
     {menuItems && <HamburgerMenu items={menuItems} />}
-    {onBack && (
-      <button
-        onClick={onBack}
-        aria-label="পিছনে যান"
-        className="flex items-center justify-center shrink-0 active:opacity-70"
-        style={{ width: 42, height: 42, borderRadius: 999, background: "rgba(255,255,255,0.22)", color: "#FFFFFF", boxShadow: "0 2px 10px rgba(0,0,0,0.28)", marginLeft: -4 }}
-      >
-        <ChevronLeft size={26} strokeWidth={2.6} />
-      </button>
-    )}
+    {onBack &&
+      createPortal(
+        <button
+          onClick={onBack}
+          aria-label="পিছনে যান"
+          className="rk-zoomable fixed flex items-center justify-center active:opacity-80"
+          style={{
+            zIndex: 60,
+            top: 10,
+            left: 10,
+            width: 46,
+            height: 46,
+            borderRadius: 999,
+            background: "var(--card)",
+            color: "var(--navy-fg)",
+            border: "2px solid var(--navy-line)",
+            boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
+          }}
+        >
+          <ChevronLeft size={28} strokeWidth={2.8} />
+        </button>,
+        document.body
+      )}
     <BookOpen size={18} style={{ opacity: 0.85 }} />
     <h1 className="flex-1" style={{ fontFamily: "'Noto Sans Bengali', sans-serif", fontSize: 19 }}>{title}</h1>
     <ThemeButton />
