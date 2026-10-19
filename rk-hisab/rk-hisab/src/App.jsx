@@ -118,6 +118,32 @@ if (typeof document !== "undefined") {
   document.documentElement.classList.toggle("rk-dark", saved === "dark");
 }
 
+// ---------- ত্রুটি ধরা: লগ রাখা, ব্যবহারকারীকে ছোট বার্তা, অ্যাপ না বসা ----------
+function logError(kind, err, extra) {
+  try {
+    const msg = String((err && err.message) || err || "").slice(0, 300);
+    if (/ResizeObserver/i.test(msg)) return;
+    const rec = {
+      at: Date.now(),
+      kind,
+      msg,
+      stack: String((err && err.stack) || "").split("\n").slice(0, 4).join(" | ").slice(0, 500),
+      extra: String(extra || "").slice(0, 300),
+    };
+    const list = pj(localStorage.getItem("rk-errors"), []);
+    list.unshift(rec);
+    localStorage.setItem("rk-errors", JSON.stringify(list.slice(0, 15)));
+    window.dispatchEvent(new CustomEvent("rk-error", { detail: rec }));
+  } catch (e) {
+    /* লগ রাখতে না পারলেও অ্যাপ চলবে */
+  }
+}
+if (typeof window !== "undefined" && !window.__rkErrHooks) {
+  window.__rkErrHooks = true;
+  window.addEventListener("error", (e) => logError("error", e.error || e.message));
+  window.addEventListener("unhandledrejection", (e) => logError("promise", e.reason));
+}
+
 function useLedgerFonts() {
   useEffect(() => {
     const id = "ledger-bn-fonts";
@@ -1006,16 +1032,52 @@ async function restoreFromBackupObject(obj, onProgress, opts = {}) {
 }
 
 // ---------- storage helpers (Firestore-backed) ----------
+// ---------- ডেটা যাচাই: সার্ভারে/ফোনে ডেটা নষ্ট বা ভুল ধরনের হলেও অ্যাপ যেন না বসে ----------
+const asArr = (v) => (Array.isArray(v) ? v : []);
+const asObj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+const toNum = (v) => (typeof v === "number" ? (Number.isFinite(v) ? v : 0) : typeof v === "string" ? Number(v) || 0 : 0);
+const asRows = (v) => asArr(v).filter((r) => r && typeof r === "object" && !Array.isArray(r));
+const strOf = (v) => (v === undefined || v === null ? "" : typeof v === "object" ? "" : String(v));
+// যে ঘরগুলো আছে সেগুলোকে লেখা (string) বানায়; না থাকা ঘর যোগ করে না
+const coerceStr = (r, keys) => {
+  const o = { ...r };
+  keys.forEach((k) => {
+    if (k in o) o[k] = strOf(o[k]);
+  });
+  return o;
+};
+const ITEM_STR_KEYS = ["id", "name", "customer", "height", "weight", "qty", "price", "due", "duePaid", "dueWaived", "discount"];
+const normItem = (r) => coerceStr(r, ITEM_STR_KEYS);
+const normExpenseRow = (r) => coerceStr(r, ["id", "name", "amount"]);
+const numField = (o, keys) => {
+  keys.forEach((k) => {
+    if (k in o) o[k] = toNum(o[k]);
+  });
+  return o;
+};
+const normMemo = (m) => ({
+  ...numField(coerceStr(m, ["id", "dueListId", "customer", "phone", "address", "note", "discount", "prevDue", "paid"]), ["no", "y", "m", "d"]),
+  items: asRows(m.items).map(normItem),
+});
+const normDue = (e) => {
+  const o = numField(coerceStr(e, ["id", "name", "item", "phone", "memoId"]), ["y", "m", "d", "memoY"]);
+  o.amount = toNum(e.amount);
+  if ("lines" in o) o.lines = asRows(o.lines).map(normItem);
+  return o;
+};
+
 async function loadDay(y, m, d) {
   const raw = await kget(dayKey(y, m, d));
   if (raw) {
     try {
-      const parsed = JSON.parse(raw);
+      const parsed = asObj(JSON.parse(raw));
+      const exps = asRows(parsed.expenses).map(normExpenseRow);
+      const its = asRows(parsed.items).map(normItem);
       return {
-        expenses: parsed.expenses && parsed.expenses.length ? parsed.expenses : [newExpenseRow()],
-        items: parsed.items && parsed.items.length ? parsed.items : [newItemRow()],
-        openingOverride: parsed.openingOverride ?? null,
-        totalOverride: parsed.totalOverride ?? null,
+        expenses: exps.length ? exps : [newExpenseRow()],
+        items: its.length ? its : [newItemRow()],
+        openingOverride: typeof parsed.openingOverride === "object" ? null : parsed.openingOverride ?? null,
+        totalOverride: typeof parsed.totalOverride === "object" ? null : parsed.totalOverride ?? null,
       };
     } catch (e) {
       /* parse error */
@@ -1032,7 +1094,13 @@ async function loadDues(year) {
   const raw = await kget(duesKey(year));
   if (raw) {
     try {
-      return JSON.parse(raw);
+      const o = asObj(JSON.parse(raw));
+      const out = {};
+      Object.keys(o).forEach((k) => {
+        const list = asRows(o[k]).map(normDue);
+        if (list.length) out[k] = list;
+      });
+      return out;
     } catch (e) {}
   }
   return {};
@@ -1050,7 +1118,14 @@ async function loadYearStats(year) {
   const raw = await kget(yearStatsKey(year));
   if (raw) {
     try {
-      return JSON.parse(raw);
+      const o = asObj(JSON.parse(raw));
+      const out = {};
+      Object.keys(o).forEach((k) => {
+        if (/^\d+-\d+$/.test(k) && o[k] && typeof o[k] === "object" && !Array.isArray(o[k])) {
+          out[k] = { income: toNum(o[k].income), expense: toNum(o[k].expense), balance: toNum(o[k].balance) };
+        }
+      });
+      return out;
     } catch (e) {}
   }
   return {};
@@ -1168,20 +1243,62 @@ const PAYABLEPAY_KEY = "payablepay";
 const STAFF_KEY = "staff";
 const STAFF_ADV_KEY = "staffadv";
 async function loadJsonList(key) {
-  const v = pj(await kget(key), []);
-  return Array.isArray(v) ? v : [];
+  return asRows(pj(await kget(key), []));
 }
 async function loadJsonObj(key) {
   const v = pj(await kget(key), {});
   return v && typeof v === "object" && !Array.isArray(v) ? v : {};
 }
-const loadStaff = () => loadJsonList(STAFF_KEY);
+const normStaff = (x) => ({ ...coerceStr(x, ["id", "name", "phone", "type", "salary"]), active: x.active !== false });
+const normAdv = (x) => numField(coerceStr(x, ["id", "staffId", "date", "note", "expId"]), ["amount", "settled"]);
+const normPayable = (x) => numField(coerceStr(x, ["id", "name", "date", "note"]), ["amount", "paid"]);
+const normPayPay = (x) => ({
+  ...numField(coerceStr(x, ["id", "key", "name", "date", "note", "expId"]), ["amount"]),
+  parts: asRows(x.parts).map((p) => ({ id: strOf(p.id), amt: toNum(p.amt) })),
+});
+const normSalaryRec = (x) => ({
+  ...numField(coerceStr(x, ["id", "date", "expId"]), ["gross", "units", "deduct", "net"]),
+  parts: asRows(x.parts).map((p) => ({ id: strOf(p.id), amt: toNum(p.amt) })),
+});
+const loadStaff = async () => (await loadJsonList(STAFF_KEY)).map(normStaff);
+const loadPayables = async () => (await loadJsonList(PAYABLES_KEY)).map(normPayable);
+const loadPayablePay = async () => (await loadJsonList(PAYABLEPAY_KEY)).map(normPayPay);
 const saveStaff = (list) => kset(STAFF_KEY, J(list));
-const loadStaffAdv = () => loadJsonList(STAFF_ADV_KEY);
+const loadStaffAdv = async () => (await loadJsonList(STAFF_ADV_KEY)).map(normAdv);
 const saveStaffAdv = (list) => kset(STAFF_ADV_KEY, J(list));
-const loadAttend = (y) => loadJsonObj(`attend:${y}`);
+const loadAttend = async (y) => {
+  const o = await loadJsonObj(`attend:${y}`);
+  const out = {};
+  Object.keys(o).forEach((mk) => {
+    const staffs = asObj(o[mk]);
+    Object.keys(staffs).forEach((sid) => {
+      const days = asObj(staffs[sid]);
+      Object.keys(days).forEach((dk) => {
+        if (days[dk] === "P" || days[dk] === "A" || days[dk] === "H") {
+          out[mk] = out[mk] || {};
+          out[mk][sid] = out[mk][sid] || {};
+          out[mk][sid][dk] = days[dk];
+        }
+      });
+    });
+  });
+  return out;
+};
 const saveAttend = (y, o) => kset(`attend:${y}`, J(o));
-const loadSalaryRec = (y) => loadJsonObj(`salary:${y}`);
+const loadSalaryRec = async (y) => {
+  const o = await loadJsonObj(`salary:${y}`);
+  const out = {};
+  Object.keys(o).forEach((mk) => {
+    const staffs = asObj(o[mk]);
+    Object.keys(staffs).forEach((sid) => {
+      if (staffs[sid] && typeof staffs[sid] === "object" && !Array.isArray(staffs[sid])) {
+        out[mk] = out[mk] || {};
+        out[mk][sid] = normSalaryRec(staffs[sid]);
+      }
+    });
+  });
+  return out;
+};
 const saveSalaryRec = (y, o) => kset(`salary:${y}`, J(o));
 const ATT_NEXT = { "": "P", P: "A", A: "H", H: "" };
 
@@ -1434,7 +1551,7 @@ async function loadMemosYear(y) {
   const raw = await kget(memosKey(y));
   if (raw) {
     try {
-      return JSON.parse(raw);
+      return asRows(JSON.parse(raw)).map(normMemo);
     } catch (e) {}
   }
   return [];
@@ -1454,7 +1571,7 @@ async function loadManualDues() {
   const raw = await kget(MANUAL_DUES_KEY);
   if (raw) {
     try {
-      return JSON.parse(raw);
+      return asRows(JSON.parse(raw)).map(normDue);
     } catch (e) {}
   }
   return [];
@@ -1502,13 +1619,15 @@ const DEFAULT_SHOP = {
 let shopInfo = { ...DEFAULT_SHOP };
 const getShop = () => shopInfo;
 function setShopInfo(v) {
-  shopInfo = { ...DEFAULT_SHOP, ...(v || {}) };
+  const c = coerceStr(asObj(v), ["name", "address", "phone", "logo"]);
+  if (!c.name || !String(c.name).trim()) delete c.name;
+  shopInfo = { ...DEFAULT_SHOP, ...c };
 }
 async function loadShopInfo() {
   const raw = await kget(SHOP_KEY);
   if (raw) {
     try {
-      setShopInfo(JSON.parse(raw));
+      setShopInfo(asObj(JSON.parse(raw)));
     } catch (e) {
       /* ignore */
     }
@@ -1629,8 +1748,7 @@ const lineText = (it) => {
 const CUSTOMERS_KEY = "customers";
 async function loadCustomerReg() {
   const raw = await kget(CUSTOMERS_KEY);
-  const list = pj(raw, []);
-  return Array.isArray(list) ? list : [];
+  return asRows(pj(raw, [])).map((c) => coerceStr(c, ["name", "phone", "address"]));
 }
 async function saveCustomerReg(list) {
   return await kset(CUSTOMERS_KEY, JSON.stringify(list));
@@ -1754,7 +1872,9 @@ async function loadTrash() {
   if (raw) {
     try {
       const cutoff = Date.now() - 30 * 86400000;
-      return JSON.parse(raw).filter((x) => x.at > cutoff);
+      return asRows(JSON.parse(raw))
+        .map((x) => numField(coerceStr(x, ["tid", "kind", "label"]), ["at", "y", "m", "d"]))
+        .filter((x) => x.at > cutoff && x.data && typeof x.data === "object");
     } catch (e) {
       /* ignore */
     }
@@ -1849,7 +1969,10 @@ const sizeText = (it) => {
 };
 function openPrintHtml(html) {
   const win = window.open("", "_blank");
-  if (!win) return;
+  if (!win) {
+    window.alert("প্রিন্ট পেজ খুলতে পারেনি — ব্রাউজারের 'পপ-আপ ব্লক' বন্ধ করে (অনুমতি দিয়ে) আবার চাপুন।");
+    return;
+  }
   win.document.write(html);
   win.document.close();
   win.focus();
@@ -2862,7 +2985,7 @@ const NameDropdown = ({ label, names, customNames, onPick, onAdd, onRemove }) =>
 };
 
 // ---------- main app ----------
-export default function LedgerApp() {
+function LedgerApp() {
   useLedgerFonts();
 
   const [view, setView] = useState("years"); // years | dues | memos | ledger | months | days | day
@@ -3118,13 +3241,13 @@ export default function LedgerApp() {
       const a = await kget("presets:sale");
       if (a) {
         try {
-          setCustomSaleNames(JSON.parse(a));
+          setCustomSaleNames(asArr(JSON.parse(a)).filter((x) => typeof x === "string"));
         } catch (e) {}
       }
       const b = await kget("presets:expense");
       if (b) {
         try {
-          setCustomExpenseNames(JSON.parse(b));
+          setCustomExpenseNames(asArr(JSON.parse(b)).filter((x) => typeof x === "string"));
         } catch (e) {}
       }
     })();
@@ -3782,7 +3905,7 @@ export default function LedgerApp() {
 
   // ---- পাওনাদার (আমি কাকে কত দেব) ----
   const loadPayablesAll = async () => {
-    const [a, b] = await Promise.all([loadJsonList(PAYABLES_KEY), loadJsonList(PAYABLEPAY_KEY)]);
+    const [a, b] = await Promise.all([loadPayables(), loadPayablePay()]);
     setPbList(a);
     setPbPays(b);
   };
@@ -4407,6 +4530,17 @@ export default function LedgerApp() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unlocked]);
+  useEffect(() => {
+    let last = 0;
+    const h = () => {
+      if (Date.now() - last < 8000) return;
+      last = Date.now();
+      showToast("⚠ একটা ছোট ত্রুটি হয়েছে — ডেটা ঠিক আছে। সমস্যা চললে পেজ রিলোড করুন");
+    };
+    window.addEventListener("rk-error", h);
+    return () => window.removeEventListener("rk-error", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (!unlocked) return;
     processRecalc();
@@ -6543,6 +6677,52 @@ export default function LedgerApp() {
                     )}
                   </div>
 
+                  {(() => {
+                    const errList = pj(localStorage.getItem("rk-errors"), []);
+                    if (!errList.length) return null;
+                    return (
+                      <div className="rounded-xl px-4 py-3 mb-3" style={{ ...box, border: "1px solid var(--orange)" }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--amber-text)", marginBottom: 4 }}>ত্রুটির লগ ({toBn(errList.length)})</div>
+                        <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 6, lineHeight: 1.6 }}>অ্যাপে ছোটখাটো ত্রুটি হলে এখানে জমা হয়। বারবার হলে "লগ কপি করুন" চেপে ডেভেলপারকে পাঠান।</p>
+                        {errList.slice(0, 3).map((e, i) => (
+                          <div key={i} style={{ fontSize: 11.5, color: "var(--ink)", borderTop: "1px solid var(--line2)", padding: "4px 0", wordBreak: "break-word" }}>
+                            {new Date(e.at).toLocaleString("bn-BD")} · {e.kind} · {e.msg}
+                          </div>
+                        ))}
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(JSON.stringify(errList, null, 1));
+                                showToast("✓ লগ কপি হয়েছে");
+                              } catch (e) {
+                                window.alert("কপি হয়নি।");
+                              }
+                            }}
+                            className="px-3 py-1 rounded-full active:opacity-70"
+                            style={{ border: "1px solid var(--navy-line)", color: NAVY, fontSize: 12, fontWeight: 700 }}
+                          >
+                            লগ কপি করুন
+                          </button>
+                          <button
+                            onClick={() => {
+                              try {
+                                localStorage.removeItem("rk-errors");
+                              } catch (e) {
+                                /* ignore */
+                              }
+                              refreshSafety();
+                            }}
+                            className="px-3 py-1 rounded-full active:opacity-70"
+                            style={{ border: "1px solid var(--line)", color: GRAY, fontSize: 12 }}
+                          >
+                            লগ মুছুন
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div ref={restoreRef} className="rounded-xl px-4 py-3 mb-3" style={box}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 2 }}>↩ ব্যাকআপ ফিরিয়ে আনুন (রিস্টোর)</div>
                     <p style={{ fontSize: 11.5, color: GRAY, marginBottom: 8, lineHeight: 1.6 }}>
@@ -7315,5 +7495,56 @@ export default function LedgerApp() {
         )}
       </div>
     </div>
+  );
+}
+
+// কোনো পেজ রেন্ডারে ভুল হলে পুরো অ্যাপ সাদা না হয়ে এই বার্তা দেখায় — ডেটা সার্ভারে নিরাপদই থাকে
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: null, n: 0 };
+  }
+  static getDerivedStateFromError(err) {
+    return { err };
+  }
+  componentDidCatch(err, info) {
+    logError("render", err, info && info.componentStack);
+  }
+  render() {
+    if (this.state.err) {
+      const btn = { padding: "11px 16px", borderRadius: 12, fontSize: 14, fontWeight: 700, border: "1px solid var(--navy-line)" };
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "var(--bg)", fontFamily: "'Noto Sans Bengali', sans-serif" }}>
+          <div style={{ maxWidth: 420, width: "100%", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 18, padding: 22, color: "var(--ink)" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "var(--navy-fg)" }}>⚠ একটা সমস্যা হয়েছে</div>
+            <p style={{ fontSize: 14, lineHeight: 1.7, margin: "10px 0 14px", color: "var(--gray)" }}>
+              চিন্তা করবেন না — আপনার হিসাব সার্ভারে সুরক্ষিত আছে। শুধু এই পর্দাটা দেখাতে গিয়ে ভুল হয়েছে। নিচের বাটনে হোমে ফিরে যান।
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => this.setState((st) => ({ err: null, n: st.n + 1 }))} style={{ ...btn, background: "var(--navy-bg)", color: "#FFFFFF" }}>
+                হোমে ফিরুন
+              </button>
+              <button onClick={() => window.location.reload()} style={{ ...btn, background: "var(--card)", color: "var(--navy-fg)" }}>
+                অ্যাপ রিলোড
+              </button>
+            </div>
+            <details style={{ marginTop: 14, fontSize: 11.5, color: "var(--gray)" }}>
+              <summary>ত্রুটির বিবরণ (ডেভেলপারকে দেখাতে)</summary>
+              <div style={{ marginTop: 6, wordBreak: "break-word" }}>{String((this.state.err && this.state.err.message) || this.state.err)}</div>
+            </details>
+          </div>
+        </div>
+      );
+    }
+    return <React.Fragment key={this.state.n}>{this.props.children}</React.Fragment>;
+  }
+}
+
+export { ErrorBoundary, logError };
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <LedgerApp />
+    </ErrorBoundary>
   );
 }
